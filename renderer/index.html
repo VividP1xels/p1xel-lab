@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data: p1xicon:; connect-src 'self' https: wss:; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'">
   <title>P1xel Lab</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -73,6 +73,10 @@
   <section id="screen-main" class="screen hidden">
     <aside class="sidebar">
       <div class="brand"><div class="logo-block sm" id="side-logo"></div><span class="logo sm">P1xel <span>Lab</span></span></div>
+      <button class="nav-btn" id="nav-friends">
+        <svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges"><path fill="currentColor" d="M4 2h3v1h1v3H7v1H4V6H3V3h1zM10 3h2v1h1v2h-1v1h-2V6H9V4h1zM2 9h7v1h1v4H1v-4h1zM11 9h3v1h1v3h-4z"/></svg>
+        Friends <small id="friends-online"></small><span class="badge hidden" id="friends-badge"></span>
+      </button>
       <div class="side-label">Instances <button class="icon-btn" id="btn-new" title="New instance">+</button></div>
       <nav id="inst-list" class="inst-list"></nav>
       <div class="side-bottom">
@@ -81,14 +85,15 @@
           VividP1xels
         </a>
         <div class="account">
-          <img id="acc-skin" alt="">
-          <div><b id="acc-name"></b><small>Microsoft account</small></div>
+          <span class="av-wrap"><img id="acc-skin" class="avatar" alt=""><i class="status-dot online" id="my-dot"></i></span>
+          <div><b id="acc-name"></b><small id="my-status">Online</small></div>
           <button class="icon-btn" id="btn-settings" title="Settings">⚙</button>
         </div>
       </div>
     </aside>
 
     <main class="content" id="content">
+      <div class="offline-banner hidden" id="offline-banner">📡 <b>You're offline.</b> You can still browse saved mods and play instances you've played before. Installing mods, chat and calls come back when you reconnect.</div>
       <div class="empty" id="empty-state">
         <h2 class="pix">No instances yet</h2>
         <button class="btn btn-primary" id="empty-new">Create an instance</button>
@@ -137,8 +142,41 @@
         <div class="tab-body hidden" id="tab-installed"><div id="installed-list" class="installed"></div></div>
         <div class="tab-body hidden" id="tab-log"><pre id="log" class="log">Press Play and the game output will show up here.</pre></div>
       </div>
+      <div id="friends-view" class="hidden">
+        <div class="friends">
+          <div class="f-left">
+            <h2 class="pix">Friends</h2>
+            <form id="add-friend" class="add-friend">
+              <input id="add-name" placeholder="Add by Minecraft username" maxlength="16" autocomplete="off">
+              <button class="btn btn-primary" type="submit">Add</button>
+            </form>
+            <div id="f-list" class="f-list"></div>
+          </div>
+          <div class="f-chat" id="f-chat"></div>
+        </div>
+      </div>
     </main>
   </section>
+
+  <!-- CALL -->
+  <div id="call" class="call hidden">
+    <div class="call-box">
+      <video id="call-remote" autoplay playsinline></video>
+      <div class="call-who"><img id="call-avatar" class="avatar" alt=""><b id="call-name"></b><span id="call-state"></span></div>
+      <video id="call-local" class="hidden" autoplay playsinline muted></video>
+      <div class="call-btns" id="call-btns"></div>
+    </div>
+  </div>
+
+  <!-- SHARE INSTANCE -->
+  <dialog id="share-dlg">
+    <form method="dialog" class="dlg">
+      <h3 class="pix">Share an instance</h3>
+      <p class="muted">Send it to <b id="share-to"></b>. They can add it with all the same mods in one click.</p>
+      <div id="share-list" class="share-list"></div>
+      <div class="dlg-row end"><button class="btn btn-ghost" value="">Cancel</button></div>
+    </form>
+  </dialog>
 
   <!-- SETTINGS -->
   <dialog id="settings">
@@ -157,6 +195,8 @@
 
   <div class="toast-host" id="toasts"></div>
   <script src="pixels.js"></script>
+  <script src="vendor/peerjs.min.js"></script>
   <script src="app.js"></script>
+  <script src="social.js"></script>
 </body>
 </html>

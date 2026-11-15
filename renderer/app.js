@@ -44,6 +44,8 @@ async function onSignedIn(user) {
   $('#acc-name').textContent = user.name; $('#acc-skin').src = user.skin; $('#tut-name').textContent = user.name;
   state.settings = await lab.getSettings();
   state.instances = await lab.listInstances();
+  Social.start();
+  if (user.offline) toast("You're offline. Showing your saved stuff until you reconnect.");
   if (!state.settings.tutorialDone) startTutorial();
   else if (!state.instances.length) openCreate(true);
   else openMain();
@@ -149,6 +151,7 @@ function renderSidebar() {
 $('#inst-list').onclick = e => { const it = e.target.closest('.inst-item'); if (it) selectInstance(it.dataset.id); };
 
 async function selectInstance(id) {
+  Social.close();
   state.current = await lab.getInstance(id);
   const i = state.current;
   $('#empty-state').classList.add('hidden'); $('#inst-view').classList.remove('hidden');
@@ -162,7 +165,7 @@ async function selectInstance(id) {
   $('.tab[data-tab=browse]').classList.toggle('hidden', vanilla);
   $('.tab[data-tab=installed]').classList.toggle('hidden', vanilla);
   setTab(vanilla ? 'log' : 'browse');
-  if (!vanilla) search(true);
+  if (!vanilla) { search(true); if (navigator.onLine) lab.prefetchMods({ mcVersion: i.mcVersion, loader: i.loader }).catch(() => {}); }
   $('#log').textContent = logs[id] || 'Press Play and the game output will show up here.';
   setPlayState(launchState[id]);
 }
@@ -207,7 +210,8 @@ async function search(reset) {
     const r = await lab.searchMods({ source: state.source, query: $('#m-query').value.trim(), mcVersion: i.mcVersion, loader: i.loader, offset: state.offset, sort: $('#m-sort').value });
     if (seq !== searchSeq) return;
     state.results = reset ? r.hits : state.results.concat(r.hits);
-    state.total = r.total; state.offset += r.hits.length;
+    state.total = r.total; state.offset += r.hits.length; state.offline = !!r.offline;
+    if (r.offline) $('#filter-note').innerHTML = `📡 <b>Offline</b>: browsing ${r.saved} saved ${state.source === 'modrinth' ? 'Modrinth' : 'CurseForge'} mods for Minecraft ${esc(i.mcVersion)} + ${LOADER_NAME[i.loader]}. Connect to the internet to install.`;
     renderResults();
   } catch (e) {
     if (seq !== searchSeq) return;
@@ -219,7 +223,7 @@ async function search(reset) {
 }
 const isInstalled = h => state.current.mods?.some(m => m.source === h.source && m.projectId === h.id);
 function renderResults() {
-  if (!state.results.length) { $('#results').innerHTML = '<div class="loading">No mods found for this version. Try another search.</div>'; $('#m-more').classList.add('hidden'); return; }
+  if (!state.results.length) { $('#results').innerHTML = state.offline ? '<div class="loading">No saved mods match that. Mods you look at while online are saved here for offline browsing.</div>' : '<div class="loading">No mods found for this version. Try another search.</div>'; $('#m-more').classList.add('hidden'); return; }
   $('#results').innerHTML = state.results.map((h, idx) => `
     <div class="mod">
       ${h.icon ? `<img src="${esc(h.icon)}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
@@ -228,7 +232,7 @@ function renderResults() {
         <span class="by">by ${esc(h.author)} · ⬇ ${fmt(h.downloads)}</span>
         <div class="desc">${esc(h.description)}</div>
         <div class="foot">${h.categories.map(c => `<span class="cat">${esc(c)}</span>`).join('')}
-          ${isInstalled(h) ? '<button class="btn ok" disabled>✓ Installed</button>' : `<button class="btn btn-primary" data-install="${idx}">Install</button>`}
+          ${isInstalled(h) ? '<button class="btn ok" disabled>✓ Installed</button>' : state.offline ? '<button class="btn" disabled title="Connect to the internet to install">Needs internet</button>' : `<button class="btn btn-primary" data-install="${idx}">Install</button>`}
         </div>
       </div>
     </div>`).join('');
@@ -329,11 +333,15 @@ $('#settings').addEventListener('close', async () => {
     if ($('#s-cf').value.trim()) patch.curseforgeKey = $('#s-cf').value.trim();
     await lab.setSettings(patch); toast('Settings saved', 'ok');
   } else if (v === 'tutorial') startTutorial();
-  else if (v === 'logout') { await lab.logout(); state.user = null; show('screen-login'); }
+  else if (v === 'logout') { Social.stop(); await lab.logout(); state.user = null; show('screen-login'); }
 });
 
+// Re-run the search when the Wi-Fi comes back or drops
+window.addEventListener('online', () => { if (state.current && !$('#inst-view').classList.contains('hidden')) search(true); });
+window.addEventListener('offline', () => { if (state.current && !$('#inst-view').classList.contains('hidden')) search(true); });
+
 // ---------- boot ----------
-(async () => {
+window.addEventListener('DOMContentLoaded', async () => {
   const u = await lab.restore().catch(() => null);
   if (u) onSignedIn(u); else show('screen-login');
-})();
+});

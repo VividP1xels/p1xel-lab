@@ -20,7 +20,8 @@
   },
   "devDependencies": {
     "electron": "^45.3.2",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "peerjs": "^1.5.5"
   },
   "productName": "P1xel Lab",
   "build": {
