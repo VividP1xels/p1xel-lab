@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'">
+  <title>P1xel Lab</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="bg-grid"></div>
+
+  <!-- 1. SIGN IN -->
+  <section id="screen-login" class="screen">
+    <div class="login-card">
+      <div class="logo-block" id="login-logo"></div>
+      <h1 class="logo">P1xel <span>Lab</span></h1>
+      <p class="tagline">The Minecraft launcher by <a href="#" data-yt>VividP1xels</a></p>
+      <button class="btn btn-ms" id="btn-login">
+        <svg viewBox="0 0 21 21" width="18" height="18"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+        Sign in with Microsoft
+      </button>
+      <p class="fine" id="login-msg">You need a Minecraft: Java Edition account. P1xel Lab never sees your password — sign-in happens on Microsoft's own page.</p>
+    </div>
+  </section>
+
+  <!-- 2. TUTORIAL -->
+  <section id="screen-tutorial" class="screen hidden">
+    <div class="tut-wrap">
+      <div class="tut-top">
+        <span class="chip">Welcome, <b id="tut-name">player</b></span>
+        <button class="link" id="tut-skip">Skip tutorial</button>
+      </div>
+      <div class="tut-stage" id="tut-stage"></div>
+      <div class="tut-nav">
+        <button class="btn btn-ghost" id="tut-prev">Back</button>
+        <div class="dots" id="tut-dots"></div>
+        <button class="btn btn-primary" id="tut-next">Next</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. CREATE INSTANCE -->
+  <section id="screen-create" class="screen hidden">
+    <div class="create-wrap">
+      <button class="link back" id="create-back">← Back</button>
+      <h2 class="pix" id="create-title">Make your first instance</h2>
+      <p class="muted">An instance is its own Minecraft install with its own mods, worlds and settings.</p>
+
+      <label class="field"><span>Name</span><input id="c-name" maxlength="40" placeholder="My Modded World" value="My First Instance"></label>
+
+      <div class="row2">
+        <label class="field"><span>Minecraft version</span><select id="c-version"><option>Loading…</option></select></label>
+        <label class="check"><input type="checkbox" id="c-snaps"> Show snapshots</label>
+      </div>
+
+      <div class="field"><span>Mod loader</span>
+        <div class="loader-cards" id="c-loaders">
+          <button class="loader" data-loader="fabric"><b>Fabric</b><small>Fast, lightweight. Most popular for new versions. <em>Recommended</em></small></button>
+          <button class="loader" data-loader="quilt"><b>Quilt</b><small>Fabric fork. Runs most Fabric mods too.</small></button>
+          <button class="loader" data-loader="vanilla"><b>Vanilla</b><small>Plain Minecraft, no mods.</small></button>
+        </div>
+      </div>
+
+      <div class="field"><span>Icon</span><div class="icon-pick" id="c-icons"></div></div>
+
+      <button class="btn btn-primary big" id="c-create">Create instance</button>
+    </div>
+  </section>
+
+  <!-- 4. MAIN APP -->
+  <section id="screen-main" class="screen hidden">
+    <aside class="sidebar">
+      <div class="brand"><div class="logo-block sm" id="side-logo"></div><span class="logo sm">P1xel <span>Lab</span></span></div>
+      <div class="side-label">Instances <button class="icon-btn" id="btn-new" title="New instance">+</button></div>
+      <nav id="inst-list" class="inst-list"></nav>
+      <div class="side-bottom">
+        <a href="#" class="yt" data-yt>
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M23 7.2a3 3 0 0 0-2.1-2.1C19 4.6 12 4.6 12 4.6s-7 0-8.9.5A3 3 0 0 0 1 7.2 31 31 0 0 0 .5 12 31 31 0 0 0 1 16.8a3 3 0 0 0 2.1 2.1c1.9.5 8.9.5 8.9.5s7 0 8.9-.5a3 3 0 0 0 2.1-2.1 31 31 0 0 0 .5-4.8 31 31 0 0 0-.5-4.8zM9.7 15.1V8.9l5.8 3.1z"/></svg>
+          VividP1xels
+        </a>
+        <div class="account">
+          <img id="acc-skin" alt="">
+          <div><b id="acc-name"></b><small>Microsoft account</small></div>
+          <button class="icon-btn" id="btn-settings" title="Settings">⚙</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="content" id="content">
+      <div class="empty" id="empty-state">
+        <h2 class="pix">No instances yet</h2>
+        <button class="btn btn-primary" id="empty-new">Create an instance</button>
+      </div>
+
+      <div id="inst-view" class="hidden">
+        <header class="inst-head">
+          <div class="inst-icon lg" id="iv-icon"></div>
+          <div class="inst-meta">
+            <h2 id="iv-name"></h2>
+            <div class="tags"><span class="tag" id="iv-ver"></span><span class="tag" id="iv-loader"></span><span class="tag" id="iv-count"></span></div>
+          </div>
+          <div class="inst-actions">
+            <button class="btn btn-ghost" id="iv-folder" title="Open folder">Open folder</button>
+            <button class="btn btn-ghost danger" id="iv-delete">Delete</button>
+            <button class="btn btn-play" id="iv-play">▶ PLAY</button>
+          </div>
+        </header>
+        <div class="launch-bar hidden" id="launch-bar"><span id="launch-text"></span><div class="bar"><i id="launch-pct"></i></div></div>
+
+        <div class="tabs">
+          <button class="tab active" data-tab="browse">Browse mods</button>
+          <button class="tab" data-tab="installed">Installed <span id="tab-count"></span></button>
+          <button class="tab" data-tab="log">Game log</button>
+        </div>
+
+        <div class="tab-body" id="tab-browse">
+          <div class="search-row">
+            <div class="source-toggle" id="src-toggle">
+              <button class="active" data-src="modrinth"><i class="dot mr"></i>Modrinth</button>
+              <button data-src="curseforge"><i class="dot cf"></i>CurseForge</button>
+            </div>
+            <input id="m-query" placeholder="Search mods… (e.g. sodium, jei, create)">
+            <select id="m-sort"><option value="relevance">Relevance</option><option value="downloads">Most downloaded</option></select>
+          </div>
+          <p class="filter-note" id="filter-note"></p>
+          <div class="cf-key hidden" id="cf-key-box">
+            <b>CurseForge needs an API key</b>
+            <p>CurseForge requires every launcher to use its own free key. Get one at <a href="#" data-url="https://console.curseforge.com/">console.curseforge.com</a>, then paste it here.</p>
+            <div class="row"><input id="cf-key-input" type="password" placeholder="$2a$10$…"><button class="btn btn-primary" id="cf-key-save">Save key</button></div>
+          </div>
+          <div class="results" id="results"></div>
+          <button class="btn btn-ghost more hidden" id="m-more">Load more</button>
+        </div>
+
+        <div class="tab-body hidden" id="tab-installed"><div id="installed-list" class="installed"></div></div>
+        <div class="tab-body hidden" id="tab-log"><pre id="log" class="log">Press Play and the game output will show up here.</pre></div>
+      </div>
+    </main>
+  </section>
+
+  <!-- SETTINGS -->
+  <dialog id="settings">
+    <form method="dialog" class="dlg">
+      <h3 class="pix">Settings</h3>
+      <label class="field"><span>Memory (RAM) — <b id="ram-val"></b></span><input type="range" id="s-ram" min="1024" max="16384" step="512"></label>
+      <label class="field"><span>Java path <small>(leave empty — P1xel Lab downloads the right Java for you)</small></span><input id="s-java" placeholder="Automatic"></label>
+      <label class="field"><span>CurseForge API key <small id="s-cf-state"></small></span><input id="s-cf" type="password" placeholder="Paste a new key to replace"></label>
+      <div class="dlg-row">
+        <button class="btn btn-ghost" value="tutorial" id="s-tutorial">Replay tutorial</button>
+        <button class="btn btn-ghost danger" value="logout" id="s-logout">Sign out</button>
+      </div>
+      <div class="dlg-row end"><button class="btn btn-ghost" value="cancel">Cancel</button><button class="btn btn-primary" value="save" id="s-save">Save</button></div>
+    </form>
+  </dialog>
+
+  <div class="toast-host" id="toasts"></div>
+  <script src="pixels.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
