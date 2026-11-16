@@ -17,6 +17,10 @@
   const uid = () => Math.random().toString(36).slice(2, 10);
   const save = () => { clearTimeout(M.saveT); M.saveT = setTimeout(() => lab.maker.save(M.cur), 400); };
   const fitsMaker = i => ['fabric', 'quilt'].includes(i.loader) && /^1\.21(\.[0-4])?$/.test(i.mcVersion);
+  const verAtLeast = (v, min) => { const a = v.split('.').map(Number), b = min.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); return true; };
+  const itemsOk = v => verAtLeast(v, '1.21') && !verAtLeast(v, '1.21.5');
+  // Can this project go into an instance/server of version v?
+  const fitsVersion = v => verAtLeast(v, '1.13') && (!M.cur.items.length || itemsOk(v)) && (!M.cur.tweaks?.spooky || verAtLeast(v, '1.15'));
 
   async function open() {
     M.mods = await lab.maker.list();
@@ -26,16 +30,16 @@
   function newMod() {
     const n = M.mods.length + 1;
     M.cur = { uid: uid(), name: n === 1 ? 'My First Mod' : `My Mod ${n}`, version: '1.0.0', description: '', author: state.user?.name || '', icon: '', pixels: Array(256).fill(''),
-      items: [], tweaks: { keepInventory: false, nightVision: false, spooky: false, welcome: '', starterKit: [] }, updated: Date.now() };
+      items: [], commands: [{ name: 'pixel', run: 'effect give @s minecraft:speed 30 1\ngive @s minecraft:diamond 1', message: '✨ Pixel power!', everyone: true }], tweaks: { keepInventory: false, nightVision: false, spooky: false, welcome: '', starterKit: [] }, updated: Date.now() };
     M.mods.unshift(M.cur); M.tab = 'info';
     lab.maker.save(M.cur); render();
   }
 
   function render() {
-    const v = $('#maker-view');
+    const v = $('#create-body');
     v.innerHTML = `
       <div class="srv-head">
-        <div><h2 class="pix">Mod Maker</h2><p class="muted">Design your own mod with no coding: crafted custom weapons and items, a starter kit, spooky nights and more. P1xel Lab turns it into a real .jar you can play or share.</p></div>
+        <div><p class="muted">Design a mod or data pack with no coding: custom commands like <b>/trigger pixel</b>, crafted custom weapons, a starter kit, spooky nights and more. It works in instances and servers, on Minecraft 1.13 and newer.</p></div>
         <button class="btn btn-primary" id="mm-new">+ New mod</button>
       </div>
       ${M.mods.length ? `<div class="srv-tabs">${M.mods.map(m => `<button class="srv-tab ${m.uid === M.cur?.uid ? 'active' : ''}" data-mod="${m.uid}">${m.icon ? `<img src="${m.icon}" alt="">` : ''}${esc(m.name)}</button>`).join('')}</div>` : ''}
@@ -49,11 +53,11 @@
     }
     $('#mm-body').innerHTML = `
       <div class="tabs mm-tabs">
-        ${[['info', 'Info & icon'], ['items', `Custom items (${M.cur.items.length})`], ['tweaks', 'Gameplay'], ['build', 'Build & play']].map(([k, t]) => `<button class="tab ${M.tab === k ? 'active' : ''}" data-mtab="${k}">${t}</button>`).join('')}
+        ${[['info', 'Info & icon'], ['commands', `Commands (${(M.cur.commands ||= []).length})`], ['items', `Custom items (${M.cur.items.length})`], ['tweaks', 'Gameplay'], ['build', 'Build & play']].map(([k, t]) => `<button class="tab ${M.tab === k ? 'active' : ''}" data-mtab="${k}">${t}</button>`).join('')}
       </div>
       <div id="mm-tab"></div>`;
     $('#mm-body .mm-tabs').onclick = e => { const t = e.target.closest('[data-mtab]'); if (t) { M.tab = t.dataset.mtab; render(); } };
-    ({ info: tabInfo, items: tabItems, tweaks: tabTweaks, build: tabBuild })[M.tab]();
+    ({ info: tabInfo, commands: tabCommands, items: tabItems, tweaks: tabTweaks, build: tabBuild })[M.tab]();
   }
   const datalist = () => `<datalist id="mm-items">${ITEMS.map(i => `<option value="${i}">`).join('')}</datalist>`;
 
@@ -111,6 +115,43 @@
     $('.palette').onclick = e => { const b = e.target.closest('[data-c]'); if (!b) return; M.color = b.dataset.c; $$('.palette [data-c]').forEach(x => x.classList.toggle('sel', x === b)); };
     $('#px-clear').onclick = () => { m.pixels = Array(256).fill(''); draw(); exportIcon(); save(); };
     draw();
+  }
+
+  // ---------- custom commands ----------
+  function tabCommands() {
+    const m = M.cur;
+    $('#mm-tab').innerHTML = `
+      <p class="muted">Make your own commands. Players run them with <code>/trigger name</code>, in any version from 1.13 up, even Vanilla. On <b>Paper servers</b> they become real commands, like <code>/pixel</code>.</p>
+      <div id="cmd-list">${m.commands.map((c, i) => `
+        <div class="srv-card cmd-card" data-c="${i}">
+          <div class="mm-item-top"><span class="it-preview cmd">/${esc(c.name || '…')}</span><button class="btn btn-ghost danger" data-cact="del">Remove</button></div>
+          <div class="row2"><label class="field"><span>Command name</span><input data-cf="name" maxlength="16" value="${esc(c.name)}" placeholder="pixel"></label>
+          <label class="check"><input type="checkbox" data-cf="everyone" ${c.everyone !== false ? 'checked' : ''}> Everyone can use it</label></div>
+          <label class="field"><span>What it does <small>(one Minecraft command per line: give, effect, tp, summon, say, playsound…)</small></span><textarea data-cf="run" rows="4" spellcheck="false" placeholder="give @s minecraft:diamond 1">${esc(c.run || '')}</textarea></label>
+          <label class="field"><span>Message to show <small>(optional)</small></span><input data-cf="message" maxlength="200" value="${esc(c.message || '')}"></label>
+          <p class="fine">Players type: <code>/trigger ${esc(c.name || 'name')}</code>${c.everyone === false ? ` · Only admins: <code>/function ${esc(String(m.name).toLowerCase().replace(/[^a-z0-9_]+/g, '_'))}:cmd_${esc(c.name || 'name')}</code>` : ''} · On Paper servers: <code>/${esc(c.name || 'name')}</code></p>
+        </div>`).join('')}</div>
+      <div class="row"><button class="btn btn-primary" id="cmd-add">+ Add command</button>
+      <select id="cmd-idea"><option value="">✨ Add an idea…</option><option value="heal">/heal: full health &amp; food</option><option value="night">/night: midnight + thunderstorm</option><option value="day">/day: make it day</option><option value="jump">/jump: super jump</option><option value="scare">/scare: a horror jumpscare 👻</option></select></div>`;
+    const IDEAS = {
+      heal: { name: 'heal', run: 'effect give @s minecraft:instant_health 1 10 true\neffect give @s minecraft:saturation 1 10 true', message: '❤ Healed!' },
+      night: { name: 'night', run: 'time set midnight\nweather thunder', message: '🌙 The night has come...' },
+      day: { name: 'day', run: 'time set day\nweather clear', message: '☀ Good morning!' },
+      jump: { name: 'jump', run: 'effect give @s minecraft:jump_boost 20 4 true', message: '🦘 Super jump for 20 seconds!' },
+      scare: { name: 'scare', run: 'playsound minecraft:entity.enderman.stare master @s ~ ~ ~ 1 0.5\neffect give @s minecraft:blindness 3 0 true\ntitle @s title {"text":"BEHIND YOU","color":"dark_red"}', message: '' },
+    };
+    $('#cmd-add').onclick = () => { m.commands.push({ name: '', run: '', message: '', everyone: true }); save(); render(); };
+    $('#cmd-idea').onchange = e => { const i = IDEAS[e.target.value]; if (i) { m.commands.push({ ...i, everyone: true }); save(); render(); } };
+    const list = $('#cmd-list');
+    list.oninput = e => {
+      const card = e.target.closest('[data-c]'); if (!card) return;
+      const c = m.commands[+card.dataset.c], f = e.target.dataset.cf;
+      if (f === 'everyone') c.everyone = e.target.checked;
+      else if (f === 'name') { c.name = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''); e.target.value = c.name; card.querySelector('.it-preview').textContent = '/' + (c.name || '…'); }
+      else c[f] = e.target.value;
+      save();
+    };
+    list.onclick = e => { const card = e.target.closest('[data-c]'); if (card && e.target.dataset.cact === 'del') { m.commands.splice(+card.dataset.c, 1); save(); render(); } };
   }
 
   // ---------- custom items ----------
@@ -202,20 +243,23 @@
 
   // ---------- build ----------
   async function tabBuild() {
-    const good = state.instances.filter(fitsMaker);
+    const good = state.instances.filter(i => fitsVersion(i.mcVersion));
+    const srvs = (await lab.servers.list()).filter(x => fitsVersion(x.mcVersion));
     $('#mm-tab').innerHTML = `
       <div class="mm-info">
         <div class="srv-card">
           <b>Add to an instance</b>
-          <p class="fine">Mod Maker mods work on <b>Fabric or Quilt</b> instances with <b>Minecraft 1.21 to 1.21.4</b>. Fabric API is added for you.</p>
+          <p class="fine">${M.cur.items.length ? 'Custom items need <b>Minecraft 1.21 to 1.21.4</b>.' : 'Works on <b>any instance from Minecraft 1.13 up</b>, even Vanilla.'} On Fabric/Quilt 1.21–1.21.4 it's added as a mod (Fabric API is added for you), and everywhere else as a data pack.</p>
           ${good.length ? `<select id="mb-inst">${good.map(i => `<option value="${esc(i.id)}">${esc(i.name)} (${esc(i.mcVersion)} ${LOADER_NAME[i.loader]})</option>`).join('')}</select>
           <button class="btn btn-play big" id="mb-install">Build &amp; add to instance</button>`
           : `<p class="muted">You don't have a matching instance yet.</p><button class="btn btn-primary" id="mb-mkinst">Make a 1.21.1 Fabric instance</button>`}
+          <b class="lbl">Add to a server</b>
+          ${srvs.length ? `<div class="row"><select id="mb-srv">${srvs.map(x => `<option value="${esc(x.id)}">${esc(x.name)} (${esc(x.mcVersion)})</option>`).join('')}</select><button class="btn btn-ghost" id="mb-srv-go">Add to server</button></div>` : '<p class="fine">No matching servers yet.</p>'}
         </div>
         <div class="srv-card">
           <b>Share it</b>
           <p class="fine">Save your mod as a .jar file to send to friends or upload to Modrinth/CurseForge.</p>
-          <div class="row"><select id="mb-ver">${['1.21.1', '1.21', '1.21.2', '1.21.3', '1.21.4'].map(v => `<option>${v}</option>`).join('')}</select><button class="btn btn-ghost" id="mb-export">Export .jar</button></div>
+          <div class="row"><select id="mb-ver">${['1.21.1', '1.21', '1.21.2', '1.21.3', '1.21.4', ...(M.cur.items.length ? [] : ['1.21.5', '1.21.6', '1.21.7', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.19.2', '1.18.2', '1.17.1', '1.16.5', '1.15.2', '1.14.4', '1.13.2'])].map(v => `<option>${v}</option>`).join('')}</select><button class="btn btn-ghost" id="mb-export">Export mod .jar</button><button class="btn btn-ghost" id="mb-export-dp">Export data pack .zip</button></div>
           <b class="lbl">What's inside</b>
           <ul class="mm-files" id="mb-files"><li class="muted">Checking…</li></ul>
         </div>
@@ -227,6 +271,16 @@
       } catch (e) { $('#mb-files').innerHTML = `<li class="err">⚠ ${esc(errMsg(e))}</li>`; }
     };
     $('#mb-ver').onchange = preview; preview();
+    $('#mb-export-dp').onclick = async () => {
+      try { const r = await lab.publish.prepare({ kind: 'datapack', from: 'maker', makerMod: M.cur, mcVersion: $('#mb-ver').value }); const f = await lab.publish.save(r.file); if (f) toast('Saved your data pack!', 'ok'); }
+      catch (e) { toast(errMsg(e), 'err'); }
+    };
+    $('#mb-srv-go') && ($('#mb-srv-go').onclick = async () => {
+      try {
+        const r = await lab.maker.installServer({ mod: M.cur, serverId: $('#mb-srv').value });
+        toast(`Added to ${r.server.name}!${r.realCommands.length ? ` Real commands: ${r.realCommands.map(c => '/' + c).join(', ')}` : ''} Restart the server to use it.`, 'ok');
+      } catch (e) { toast(errMsg(e), 'err'); }
+    });
     $('#mb-export').onclick = async () => {
       try { const p = await lab.maker.exportJar({ mod: M.cur, mcVersion: $('#mb-ver').value }); if (p) toast('Saved your mod!', 'ok'); }
       catch (e) { toast(errMsg(e), 'err'); }
@@ -236,7 +290,7 @@
       const b = $('#mb-install'); b.disabled = true; b.textContent = 'Building…';
       try {
         const r = await lab.maker.install({ mod: M.cur, instanceId: $('#mb-inst').value });
-        toast(`${M.cur.name} added to ${r.instance.name}!${r.fabricApi === 'added' ? ' (Fabric API added too)' : ''}`, 'ok');
+        toast(`${M.cur.name} added to ${r.instance.name}${r.asDatapack ? ' as a data pack. It goes into every world when you press Play' : ''}!${r.fabricApi === 'added' ? ' (Fabric API added too)' : ''}`, 'ok');
         if (typeof r.fabricApi === 'string' && !['added', 'present'].includes(r.fabricApi)) toast(`Couldn't add Fabric API automatically: install it from Browse mods.`, 'err');
         Notes.add({ kind: 'mod', title: `Built ${M.cur.name}`, body: `Added to ${r.instance.name}. Press Play to try it!`, action: { type: 'instance', id: r.instance.id } });
         state.instances = await lab.listInstances();

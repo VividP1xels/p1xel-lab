@@ -168,7 +168,7 @@ function showView(v) {
   document.body.classList.toggle('friends-open', v !== 'instance');
   $('#' + v + '-view').classList.remove('hidden');
   if (v === 'servers') Servers.open();
-  if (v === 'maker') Maker.open();
+  if (v === 'maker') Create.open();
   if (v === 'publish') Publish.open();
 }
 $('#nav-publish').onclick = () => showView('publish');
@@ -445,12 +445,24 @@ async function runBoost(id, quiet) {
 }
 lab.onSpeedProgress(p => { const b = $('#iv-boost'); if (b.disabled) b.textContent = `⚡ Boosting ${p.done}/${p.total}…`; });
 function updateBoost() {
-  const i = state.current, b = $('#iv-boost');
+  const i = state.current, b = $('#iv-boost'), via = $('#iv-via');
+  via.classList.toggle('hidden', i.loader === 'vanilla');
+  via.disabled = !!i.anyVersion;
+  via.textContent = i.anyVersion ? '🌐 Any version: on' : '🌐 Any Version';
   b.classList.toggle('hidden', i.loader === 'vanilla');
   b.disabled = !!i.boosted;
   b.textContent = i.boosted ? '⚡ Boosted' : '⚡ Speed Boost';
 }
 $('#iv-boost').onclick = () => runBoost(state.current.id);
+$('#iv-via').onclick = async () => {
+  const id = state.current.id, b = $('#iv-via');
+  b.disabled = true; b.textContent = '🌐 Adding…';
+  try {
+    const r = await lab.anyVersion(id);
+    if (state.current?.id === id) { state.current = r.instance; updateCounts(); updateBoost(); }
+    toast(`🌐 Added ${r.added.join(', ') || 'ViaFabricPlus'}. On the Multiplayer screen you can now pick which version to join with.`, 'ok');
+  } catch (e) { toast(errMsg(e), 'err'); updateBoost(); }
+};
 
 // ---------- instance actions ----------
 $('#iv-folder').onclick = () => lab.openFolder(state.current.id);

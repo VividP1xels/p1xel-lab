@@ -236,10 +236,11 @@
   function cleanShare(s) {
     return {
       name: String(s.name || 'Instance').slice(0, 40), mcVersion: String(s.mcVersion || '').slice(0, 20),
-      loader: ['fabric', 'quilt', 'vanilla'].includes(s.loader) ? s.loader : 'vanilla',
+      loader: ['fabric', 'quilt', 'forge', 'neoforge', 'vanilla'].includes(s.loader) ? s.loader : 'vanilla',
       icon: Pixels.BLOCKS[s.icon] ? s.icon : 'grass',
       mods: (Array.isArray(s.mods) ? s.mods : []).slice(0, 300).map(m => ({
         source: m.source === 'curseforge' ? 'curseforge' : 'modrinth', projectId: String(m.projectId).slice(0, 40), title: String(m.title || '').slice(0, 80),
+        type: ['mod', 'shader', 'resourcepack', 'datapack'].includes(m.type) ? m.type : 'mod',
       })),
     };
   }
@@ -300,7 +301,7 @@
       let done = 0, failed = 0;
       for (const m of share.mods) {
         btn.textContent = `Installing ${++done}/${share.mods.length}…`;
-        try { await lab.installMod({ instanceId: inst.id, source: m.source, projectId: m.projectId }); } catch { failed++; }
+        try { await lab.installMod({ instanceId: inst.id, source: m.source, projectId: m.projectId, type: m.type || 'mod' }); } catch { failed++; }
       }
       state.instances = await lab.listInstances();
       renderSidebar();
@@ -567,7 +568,7 @@
     dlg.showModal();
     dlg.onclose = () => {
       const inst = list.find(i => i.id === dlg.returnValue); if (!inst) return;
-      sendMessage(u, { share: { name: inst.name, mcVersion: inst.mcVersion, loader: inst.loader, icon: inst.icon, mods: (inst.mods || []).map(m => ({ source: m.source, projectId: m.projectId, title: m.title })) } });
+      sendMessage(u, { share: { name: inst.name, mcVersion: inst.mcVersion, loader: inst.loader, icon: inst.icon, mods: (inst.mods || []).filter(m => m.source === 'modrinth' || m.source === 'curseforge').map(m => ({ source: m.source, projectId: m.projectId, title: m.title, type: m.type || 'mod' })) } });
     };
   }
 
@@ -611,6 +612,7 @@
     closeFriends();
   }
   const friendsList = () => S.data ? friends().filter(f => f.state === 'friend').sort((a, b) => a.name.localeCompare(b.name)) : [];
+  const sendShare = (u, share) => { if (rel(u) === 'friend') sendMessage(u, { share: cleanShare(share) }); };
   const sendText = (u, text) => { if (rel(u) === 'friend') sendMessage(u, { text: String(text).slice(0, 2000) }); };
-  window.Social = { start, stop, close: closeFriends, renderMe, openChat, friendsList, sendText };
+  window.Social = { start, stop, close: closeFriends, renderMe, openChat, friendsList, sendText, sendShare };
 })();

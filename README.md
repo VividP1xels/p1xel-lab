@@ -13,8 +13,20 @@ A Minecraft: Java Edition launcher built for modding, by **[VividP1xels](https:/
 
 8. **Forge and NeoForge.** Instances can now use Fabric, Quilt, Forge, NeoForge (beta) or Vanilla, so big and horror mods that are Forge-only work too.
 9. **Smarter search.** Typing a file name like `wonderland_forge_1.20.1.jar` searches for "wonderland". If nothing fits your instance, P1xel Lab shows every version and offers **Make instance for it**, which creates a matching instance and installs the mod. You can also add `.jar` files from anywhere with **Add .jar file** or by dragging them onto the window.
-10. **Servers.** Host a Minecraft server on your own computer for free, using as much RAM as your PC can spare. Copy an instance's modpack, start and stop it, type server commands, invite friends, and press **Play on it**. Friends on the same Wi-Fi join with the address shown. Friends elsewhere need [playit.gg](https://playit.gg) (free) or port forwarding. Servers are Vanilla or Fabric for now.
-11. **Mod Maker.** Make a real mod with no coding: custom crafted items with their own name, color, enchantments, damage and glow, a starter kit, keep inventory, night vision, a welcome message and **spooky nights**. Draw a pixel icon, then add it to an instance or export the `.jar`. Works on Fabric/Quilt for Minecraft 1.21 to 1.21.4.
+10. **Servers.** Host Vanilla, Paper (plugins), Fabric, Forge or NeoForge servers on your own computer for free.
+    - RAM from 0 to 10,000 GB, or **♾ Unlimited**. It can never use more than your PC really has, so it uses all the RAM the computer can spare, and the screen shows exactly how much.
+    - Content tab: add mods, plugins, data packs, a server resource pack, and **Player Pack** extras (shaders and player-side mods), from Modrinth/CurseForge or your own files. Client-only mods automatically move into the Player Pack.
+    - **Invite + send Player Pack** lets friends add everything they need in one click.
+    - Settings: name, MOTD, port, server IP (bind address), icon, game mode, difficulty, PvP, hardcore, whitelist, view distance, seed, world type and more. Your public IP is shown, but it comes from your internet provider and can't be changed.
+    - Players tab (op, kick, ban, whitelist), console with quick commands, backups (make, restore), new world, auto-restart after crashes, backup on stop, ⚡ server Speed Boost.
+    - **🌐 Any version:** ViaVersion + ViaBackwards + ViaRewind on Paper, ViaFabric + ViaBackwards on Fabric. Instances get ViaFabricPlus (Fabric/Quilt) or ViaForge (Forge/NeoForge) with the **🌐 Any Version** button.
+    - Friends outside your Wi-Fi need [playit.gg](https://playit.gg) (free) or port forwarding.
+11. **Create** (sidebar). Three makers in one tab:
+    - **Mods & Data Packs:** custom commands (`/trigger pixel` on any version from 1.13 up, real `/pixel` on Paper servers), crafted custom items (1.21 to 1.21.4), starter kit, spooky nights and more. Fabric/Quilt 1.21 to 1.21.4 get a mod `.jar`, and everything else gets a data pack. Add to instances or servers, or export.
+    - **Resource Packs:** pick any item, block or mob texture from the game and repaint it in a pixel editor (pencil, fill, eraser, color picker, undo). It's added and turned on for you.
+    - **Shaders:** looks like Vivid, Horror, Retro, Noir, Underwater and more, with sliders and a live preview. Builds a real Iris/OptiFine shader pack and turns it on.
+
+    Old Mod Maker notes: Make a real mod with no coding: custom crafted items with their own name, color, enchantments, damage and glow, a starter kit, keep inventory, night vision, a welcome message and **spooky nights**. Draw a pixel icon, then add it to an instance or export the `.jar`. Works on Fabric/Quilt for Minecraft 1.21 to 1.21.4.
 12. **⚡ Speed Boost.** One click adds ModernFix, FerriteCore, Sodium (or Embeddium), Lithium, ImmediatelyFast and Entity Culling. They make Minecraft start faster, use less memory and run at a higher FPS. It's on by default for new modded instances. Game files also download 32 at a time instead of 2, and Java uses settings tuned for Minecraft.
 
 13. **Shaders, resource packs, data packs and modpacks.** The Browse tab has a tab for each type, from both Modrinth and CurseForge. Shaders add Iris (or Oculus on Forge) for you. Data packs are added to every world in the instance when you press Play. Modpacks install as a new instance with the right Minecraft version, loader and files. You can also import a `.mrpack` or CurseForge modpack `.zip` from the New instance screen.
