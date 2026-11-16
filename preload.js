@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const invoke = (ch, ...a) => ipcRenderer.invoke(ch, ...a);
 const on = ch => cb => {
@@ -37,6 +37,33 @@ contextBridge.exposeInMainWorld('lab', {
   checkUpdate: () => invoke('update:check'),
   installUpdate: () => invoke('update:install'),
   onUpdateProgress: on('update:progress'),
+  addModFiles: d => invoke('mods:addFiles', d),
+  joinServer: d => invoke('game:join', d),
+  servers: {
+    info: () => invoke('servers:info'),
+    list: () => invoke('servers:list'),
+    log: id => invoke('servers:log', id),
+    create: d => invoke('servers:create', d),
+    update: d => invoke('servers:update', d),
+    remove: id => invoke('servers:delete', id),
+    folder: id => invoke('servers:folder', id),
+    start: id => invoke('servers:start', id),
+    stop: id => invoke('servers:stop', id),
+    command: d => invoke('servers:command', d),
+    onStatus: on('server:status'),
+    onLog: on('server:log'),
+  },
+  maker: {
+    list: () => invoke('maker:list'),
+    save: m => invoke('maker:save', m),
+    remove: uid => invoke('maker:delete', uid),
+    preview: d => invoke('maker:preview', d),
+    install: d => invoke('maker:install', d),
+    exportJar: d => invoke('maker:export', d),
+  },
+  filePath: f => webUtils.getPathForFile(f),
+  speedBoost: id => invoke('speed:boost', id),
+  onSpeedProgress: on('speed:progress'),
   launch: id => invoke('game:launch', id),
   stop: id => invoke('game:stop', id),
   onModProgress: on('mods:progress'),

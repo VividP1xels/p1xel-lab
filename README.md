@@ -11,6 +11,12 @@ A Minecraft: Java Edition launcher built for modding, by **[VividP1xels](https:/
 6. **Browse mods offline.** Every mod you see while online is saved on your computer with its icon. P1xel Lab also saves the 150 most popular mods for each instance in the background. With no internet, you can still search and browse those saved mods, and play instances you've already played. Installing new mods needs internet.
 7. **Friends.** Add people by their Minecraft username. Text chat (with delivered ticks and "typing…"), voice calls, video calls, and sharing a whole instance, so a friend can add the same modpack in one click. Each friend shows **Online**, **Offline** or **Playing &lt;instance&gt;**, and your own status follows your Wi-Fi connection. You can remove or block anyone.
 
+8. **Forge and NeoForge.** Instances can now use Fabric, Quilt, Forge, NeoForge (beta) or Vanilla, so big and horror mods that are Forge-only work too.
+9. **Smarter search.** Typing a file name like `wonderland_forge_1.20.1.jar` searches for "wonderland". If nothing fits your instance, P1xel Lab shows every version and offers **Make instance for it**, which creates a matching instance and installs the mod. You can also add `.jar` files from anywhere with **Add .jar file** or by dragging them onto the window.
+10. **Servers.** Host a Minecraft server on your own computer for free, using as much RAM as your PC can spare. Copy an instance's modpack, start and stop it, type server commands, invite friends, and press **Play on it**. Friends on the same Wi-Fi join with the address shown. Friends elsewhere need [playit.gg](https://playit.gg) (free) or port forwarding. Servers are Vanilla or Fabric for now.
+11. **Mod Maker.** Make a real mod with no coding: custom crafted items with their own name, color, enchantments, damage and glow, a starter kit, keep inventory, night vision, a welcome message and **spooky nights**. Draw a pixel icon, then add it to an instance or export the `.jar`. Works on Fabric/Quilt for Minecraft 1.21 to 1.21.4.
+12. **⚡ Speed Boost.** One click adds ModernFix, FerriteCore, Sodium (or Embeddium), Lithium, ImmediatelyFast and Entity Culling. They make Minecraft start faster, use less memory and run at a higher FPS. It's on by default for new modded instances. Game files also download 32 at a time instead of 2, and Java uses settings tuned for Minecraft.
+
 ## How friends work
 
 - Launchers connect to each other directly (peer-to-peer) using [PeerJS](https://peerjs.com)'s free public connection service, so there's no server to run.

@@ -59,11 +59,15 @@
         <div class="loader-cards" id="c-loaders">
           <button class="loader" data-loader="fabric"><b>Fabric</b><small>Fast, lightweight. Most popular for new versions. <em>Recommended</em></small></button>
           <button class="loader" data-loader="quilt"><b>Quilt</b><small>Fabric fork. Runs most Fabric mods too.</small></button>
+          <button class="loader" data-loader="forge"><b>Forge</b><small>The classic. Lots of big & horror mods.</small></button>
+          <button class="loader" data-loader="neoforge"><b>NeoForge</b><small>Newer Forge, for 1.20.2+. <em class="beta">Beta</em></small></button>
           <button class="loader" data-loader="vanilla"><b>Vanilla</b><small>Plain Minecraft, no mods.</small></button>
         </div>
       </div>
 
       <div class="field"><span>Icon</span><div class="icon-pick" id="c-icons"></div></div>
+
+      <label class="toggle boost-toggle" id="c-boost-wrap"><input type="checkbox" id="c-boost" checked><span><b>⚡ Speed Boost (recommended)</b><small>Adds ModernFix, FerriteCore, Sodium and friends: Minecraft starts much faster, uses less memory and gets way more FPS.</small></span></label>
 
       <button class="btn btn-primary big" id="c-create">Create instance</button>
     </div>
@@ -79,9 +83,17 @@
         </button>
       </div>
       <button class="update-btn hidden" id="update-btn"><svg viewBox="0 0 8 8" width="12" height="12" shape-rendering="crispEdges"><path fill="currentColor" d="M3 0h2v1h1v1h1v1H5v5H3V3H1V2h1V1h1z"/></svg> New Update</button>
-      <button class="nav-btn" id="nav-friends">
+      <button class="nav-btn" id="nav-friends" data-view="friends">
         <svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges"><path fill="currentColor" d="M4 2h3v1h1v3H7v1H4V6H3V3h1zM10 3h2v1h1v2h-1v1h-2V6H9V4h1zM2 9h7v1h1v4H1v-4h1zM11 9h3v1h1v3h-4z"/></svg>
         Friends <small id="friends-online"></small><span class="badge hidden" id="friends-badge"></span>
+      </button>
+      <button class="nav-btn" id="nav-servers" data-view="servers">
+        <svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges"><path fill="currentColor" d="M2 2h12v5H2zM2 9h12v5H2z"/><path fill="#0d0b14" d="M4 4h1v1H4zM4 11h1v1H4zM7 4h5v1H7zM7 11h5v1H7z"/></svg>
+        Servers <small id="servers-running"></small>
+      </button>
+      <button class="nav-btn" id="nav-maker" data-view="maker">
+        <svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges"><path fill="currentColor" d="M10 1h3v1h1v3h-1v1h-1v1h-1v1h-1v1H9v1H8v1H7v1H6v1H5v1H4v1H1v-3h1v-1h1v-1h1V9h1V8h1V7h1V6h1V5h1V4h1V3h1V2h1z"/></svg>
+        Mod Maker
       </button>
       <div class="side-label">Instances <button class="icon-btn" id="btn-new" title="New instance">+</button></div>
       <nav id="inst-list" class="inst-list"></nav>
@@ -113,6 +125,7 @@
             <div class="tags"><span class="tag" id="iv-ver"></span><span class="tag" id="iv-loader"></span><span class="tag" id="iv-count"></span></div>
           </div>
           <div class="inst-actions">
+            <button class="btn btn-boost" id="iv-boost" title="Add mods that make Minecraft load and run faster">⚡ Speed Boost</button>
             <button class="btn btn-ghost" id="iv-folder" title="Open folder">Open folder</button>
             <button class="btn btn-ghost danger" id="iv-delete">Delete</button>
             <button class="btn btn-play" id="iv-play">▶ PLAY</button>
@@ -135,7 +148,7 @@
             <input id="m-query" placeholder="Search mods… (e.g. sodium, jei, create)">
             <select id="m-sort"><option value="relevance">Relevance</option><option value="downloads">Most downloaded</option></select>
           </div>
-          <p class="filter-note" id="filter-note"></p>
+          <div class="filter-row"><p class="filter-note" id="filter-note"></p><label class="check sm"><input type="checkbox" id="m-any"> Show mods for every version &amp; loader</label></div>
           <div class="cf-key hidden" id="cf-key-box">
             <b>CurseForge needs an API key</b>
             <p>CurseForge requires every launcher to use its own free key. Get one at <a href="#" data-url="https://console.curseforge.com/">console.curseforge.com</a>, then paste it here.</p>
@@ -145,9 +158,14 @@
           <button class="btn btn-ghost more hidden" id="m-more">Load more</button>
         </div>
 
-        <div class="tab-body hidden" id="tab-installed"><div id="installed-list" class="installed"></div></div>
+        <div class="tab-body hidden" id="tab-installed">
+          <div class="add-files"><button class="btn btn-ghost" id="add-jar">+ Add .jar file</button><span class="muted">Got a mod from another website or Discord? Add it here, or drag the file onto this window.</span></div>
+          <div id="installed-list" class="installed"></div>
+        </div>
         <div class="tab-body hidden" id="tab-log"><pre id="log" class="log">Press Play and the game output will show up here.</pre></div>
       </div>
+      <div id="servers-view" class="hidden"></div>
+      <div id="maker-view" class="hidden"></div>
       <div id="friends-view" class="hidden">
         <div class="friends">
           <div class="f-left">
@@ -225,11 +243,14 @@
     </form>
   </dialog>
 
+  <div class="drop-hint hidden" id="drop-hint"><div>Drop .jar files to add them to <b id="drop-inst"></b></div></div>
   <div class="toast-host" id="toasts"></div>
   <script src="pixels.js"></script>
   <script src="vendor/peerjs.min.js"></script>
   <script src="app.js"></script>
   <script src="notifications.js"></script>
   <script src="social.js"></script>
+  <script src="servers.js"></script>
+  <script src="maker.js"></script>
 </body>
 </html>

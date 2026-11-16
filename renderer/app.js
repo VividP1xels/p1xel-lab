@@ -4,7 +4,7 @@ const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(n || 0);
 const YT = 'https://www.youtube.com/@VividP1xels';
-const LOADER_NAME = { fabric: 'Fabric', quilt: 'Quilt', vanilla: 'Vanilla' };
+const LOADER_NAME = { fabric: 'Fabric', quilt: 'Quilt', forge: 'Forge', neoforge: 'NeoForge', vanilla: 'Vanilla' };
 
 const state = { user: null, settings: {}, instances: [], current: null, source: 'modrinth', results: [], offset: 0, total: 0, firstRun: false };
 
@@ -89,7 +89,7 @@ let cLoader = 'fabric', cIcon = 'grass', versionsLoaded = false;
 $('#c-icons').innerHTML = Object.keys(Pixels.BLOCKS).map(k => `<button data-icon="${k}" class="${k === cIcon ? 'sel' : ''}" title="${k}">${Pixels.block(k, 32)}</button>`).join('');
 $('#c-icons').onclick = e => { const b = e.target.closest('button'); if (!b) return; cIcon = b.dataset.icon; $$('#c-icons button').forEach(x => x.classList.toggle('sel', x === b)); };
 $('#c-loaders').onclick = e => { const b = e.target.closest('.loader'); if (!b || b.disabled) return; selectLoader(b.dataset.loader); };
-function selectLoader(l) { cLoader = l; $$('.loader').forEach(x => x.classList.toggle('sel', x.dataset.loader === l)); }
+function selectLoader(l) { cLoader = l; $$('.loader').forEach(x => x.classList.toggle('sel', x.dataset.loader === l)); $('#c-boost-wrap').classList.toggle('hidden', l === 'vanilla'); }
 selectLoader('fabric');
 
 async function loadVersions() {
@@ -98,25 +98,35 @@ async function loadVersions() {
     const list = await lab.versions($('#c-snaps').checked);
     sel.innerHTML = list.map(v => `<option value="${esc(v.id)}">${esc(v.id)}${v.type !== 'release' ? ' (snapshot)' : ''}</option>`).join('');
     versionsLoaded = true;
+    applyPreset();
     checkLoaders();
   } catch (e) { sel.innerHTML = '<option>Couldn\'t load versions — check your internet</option>'; }
 }
 async function checkLoaders() {
   const v = $('#c-version').value;
-  const ok = await lab.loaders(v).catch(() => ({ vanilla: true, fabric: true, quilt: true }));
+  const ok = await lab.loaders(v).catch(() => ({ vanilla: true, fabric: true, quilt: true, forge: true, neoforge: true }));
+  if ($('#c-version').value !== v) return;
   $$('.loader').forEach(b => { b.disabled = !ok[b.dataset.loader]; });
-  if (!ok[cLoader]) selectLoader(ok.fabric ? 'fabric' : ok.quilt ? 'quilt' : 'vanilla');
+  if (!ok[cLoader]) selectLoader(['fabric', 'forge', 'neoforge', 'quilt', 'vanilla'].find(l => ok[l]));
 }
 $('#c-snaps').onchange = loadVersions;
 $('#c-version').onchange = checkLoaders;
 
-function openCreate(first) {
+let createPreset = null;
+function applyPreset() {
+  const p = createPreset; if (!p) return;
+  if ([...$('#c-version').options].some(o => o.value === p.mcVersion)) $('#c-version').value = p.mcVersion;
+  selectLoader(p.loader);
+}
+// preset: { name, mcVersion, loader, mod } — used by "Make an instance for this mod"
+function openCreate(first, preset) {
   state.firstRun = first;
-  $('#create-title').textContent = first ? 'Make your first instance' : 'New instance';
+  createPreset = preset || null;
+  $('#create-title').textContent = first ? 'Make your first instance' : preset ? `New instance for ${preset.mod.title}` : 'New instance';
   $('#create-back').classList.toggle('hidden', first);
-  $('#c-name').value = first ? 'My First Instance' : '';
+  $('#c-name').value = first ? 'My First Instance' : preset ? preset.name : '';
   show('screen-create');
-  if (!versionsLoaded) loadVersions();
+  if (!versionsLoaded) loadVersions(); else if (preset) { applyPreset(); checkLoaders(); }
 }
 $('#create-back').onclick = openMain;
 $('#c-create').onclick = async () => {
@@ -130,11 +140,33 @@ $('#c-create').onclick = async () => {
     toast(`Created "${inst.name}"`, 'ok');
     openMain(inst.id);
     if (state.firstRun && inst.loader !== 'vanilla') toast('Now search for a mod and hit Install — try "sodium"!');
+    if (inst.loader !== 'vanilla' && $('#c-boost').checked) runBoost(inst.id, true);
+    const want = createPreset?.mod; createPreset = null;
+    if (want) {
+      toast(`Installing ${want.title}…`);
+      lab.installMod({ instanceId: inst.id, source: want.source, projectId: want.id })
+        .then(r => { if (state.current?.id === inst.id) { state.current = r.instance; updateCounts(); renderResults(); } toast(`Installed ${want.title}`, 'ok'); })
+        .catch(e => toast(errMsg(e), 'err'));
+    }
   } catch (e) { toast(errMsg(e), 'err'); }
   finally { b.disabled = false; }
 };
 $('#btn-new').onclick = () => openCreate(false);
 $('#empty-new').onclick = () => openCreate(false);
+
+// ---------- views (instance / friends / servers / mod maker) ----------
+const VIEWS = ['inst-view', 'empty-state', 'friends-view', 'servers-view', 'maker-view'];
+function showView(v) {
+  if (v !== 'friends') Social.close();
+  VIEWS.forEach(id => $('#' + id).classList.add('hidden'));
+  $$('.nav-btn[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === v));
+  document.body.classList.toggle('friends-open', v !== 'instance');
+  $('#' + v + '-view').classList.remove('hidden');
+  if (v === 'servers') Servers.open();
+  if (v === 'maker') Maker.open();
+}
+$('#nav-servers').onclick = () => showView('servers');
+$('#nav-maker').onclick = () => showView('maker');
 
 // ---------- 4. main ----------
 function openMain(selectId) {
@@ -154,6 +186,8 @@ $('#inst-list').onclick = e => { const it = e.target.closest('.inst-item'); if (
 
 async function selectInstance(id) {
   Social.close();
+  $$('.nav-btn[data-view]').forEach(b => b.classList.remove('active'));
+  $('#servers-view').classList.add('hidden'); $('#maker-view').classList.add('hidden');
   state.current = await lab.getInstance(id);
   const i = state.current;
   $('#empty-state').classList.add('hidden'); $('#inst-view').classList.remove('hidden');
@@ -162,6 +196,7 @@ async function selectInstance(id) {
   $('#iv-ver').textContent = 'Minecraft ' + i.mcVersion;
   $('#iv-loader').textContent = LOADER_NAME[i.loader]; $('#iv-loader').className = 'tag ' + i.loader;
   updateCounts();
+  updateBoost();
   renderSidebar();
   const vanilla = i.loader === 'vanilla';
   $('.tab[data-tab=browse]').classList.toggle('hidden', vanilla);
@@ -194,6 +229,7 @@ $('#src-toggle').onclick = e => {
 let debounce;
 $('#m-query').oninput = () => { clearTimeout(debounce); debounce = setTimeout(() => search(true), 350); };
 $('#m-sort').onchange = () => search(true);
+$('#m-any').onchange = () => search(true);
 $('#m-more').onclick = () => search(false);
 $('#cf-key-save').onclick = async () => {
   const k = $('#cf-key-input').value.trim(); if (!k) return;
@@ -209,8 +245,19 @@ async function search(reset) {
   $('#filter-note').innerHTML = `Showing <b>${state.source === 'modrinth' ? 'Modrinth' : 'CurseForge'}</b> mods that work with <b>Minecraft ${esc(i.mcVersion)}</b> + <b>${LOADER_NAME[i.loader]}</b>`;
   $('#cf-key-box').classList.add('hidden');
   try {
-    const r = await lab.searchMods({ source: state.source, query: $('#m-query').value.trim(), mcVersion: i.mcVersion, loader: i.loader, offset: state.offset, sort: $('#m-sort').value });
+    const query = $('#m-query').value.trim();
+    let any = $('#m-any').checked;
+    let r = await lab.searchMods({ source: state.source, query, mcVersion: i.mcVersion, loader: i.loader, offset: state.offset, sort: $('#m-sort').value, anyVersion: any });
+    // Nothing for this version? Look everywhere so you can see where the mod is available.
+    if (reset && !any && query && !r.hits.length && !r.offline) {
+      const all = await lab.searchMods({ source: state.source, query, offset: 0, sort: $('#m-sort').value, anyVersion: true });
+      if (all.hits.length) { r = all; any = true; state.autoAny = true; }
+    } else if (reset) state.autoAny = false;
+    state.any = any;
     if (seq !== searchSeq) return;
+    if (any) $('#filter-note').innerHTML = state.autoAny
+      ? `Nothing on ${state.source === 'modrinth' ? 'Modrinth' : 'CurseForge'} for <b>${esc(i.mcVersion)} ${LOADER_NAME[i.loader]}</b>, so here's every version. Mods marked ⚠ need a different instance.`
+      : `Showing <b>every version &amp; loader</b>. Mods marked ⚠ won't work in this instance, but P1xel Lab can make one that fits.`;
     state.results = reset ? r.hits : state.results.concat(r.hits);
     state.total = r.total; state.offset += r.hits.length; state.offline = !!r.offline;
     if (r.offline) $('#filter-note').innerHTML = `📡 <b>Offline</b>: browsing ${r.saved} saved ${state.source === 'modrinth' ? 'Modrinth' : 'CurseForge'} mods for Minecraft ${esc(i.mcVersion)} + ${LOADER_NAME[i.loader]}. Connect to the internet to install.`;
@@ -224,6 +271,17 @@ async function search(reset) {
   }
 }
 const isInstalled = h => state.current.mods?.some(m => m.source === h.source && m.projectId === h.id);
+function fits(h, inst = state.current) {
+  if (!state.any) return true;
+  const okVer = !h.gameVersions?.length || h.gameVersions.includes(inst.mcVersion);
+  const okLoader = !h.loaders?.length || h.loaders.includes(inst.loader) || (inst.loader === 'quilt' && h.loaders.includes('fabric'));
+  return okVer && okLoader;
+}
+function suggestFor(h) {
+  const prefer = [state.current.loader, 'fabric', 'forge', 'neoforge', 'quilt'];
+  const loader = prefer.find(l => h.loaders?.includes(l)) || 'fabric';
+  return { loader, mcVersion: h.gameVersions?.[0] || state.current.mcVersion };
+}
 function renderResults() {
   if (!state.results.length) { $('#results').innerHTML = state.offline ? '<div class="loading">No saved mods match that. Mods you look at while online are saved here for offline browsing.</div>' : '<div class="loading">No mods found for this version. Try another search.</div>'; $('#m-more').classList.add('hidden'); return; }
   $('#results').innerHTML = state.results.map((h, idx) => `
@@ -233,8 +291,12 @@ function renderResults() {
         <h4 data-detail="${idx}" title="See details">${esc(h.title)}</h4>
         <span class="by">by ${esc(h.author)} · ⬇ ${fmt(h.downloads)}</span>
         <div class="desc">${esc(h.description)}</div>
+        ${!fits(h) ? (() => { const sg = suggestFor(h); return `<div class="nofit">⚠ Not for ${esc(state.current.mcVersion)} ${LOADER_NAME[state.current.loader]}. Works on ${esc(LOADER_NAME[sg.loader] || sg.loader)} ${esc(sg.mcVersion)}${h.gameVersions?.length > 1 ? ' and more' : ''}</div>`; })() : ''}
         <div class="foot">${h.categories.map(c => `<span class="cat">${esc(c)}</span>`).join('')}
-          ${isInstalled(h) ? '<button class="btn ok" disabled>✓ Installed</button>' : state.offline ? '<button class="btn" disabled title="Connect to the internet to install">Needs internet</button>' : `<button class="btn btn-primary" data-install="${idx}">Install</button>`}
+          ${isInstalled(h) ? '<button class="btn ok" disabled>✓ Installed</button>'
+            : state.offline ? '<button class="btn" disabled title="Connect to the internet to install">Needs internet</button>'
+            : !fits(h) ? `<button class="btn btn-ghost" data-newinst="${idx}" title="Make a new instance this mod works in">Make instance for it</button>`
+            : `<button class="btn btn-primary" data-install="${idx}">Install</button>`}
         </div>
       </div>
     </div>`).join('');
@@ -257,6 +319,8 @@ function showModDetails(h) {
 }
 $('#results').onclick = async e => {
   const d = e.target.closest('[data-detail]'); if (d) return showModDetails(state.results[+d.dataset.detail]);
+  const ni = e.target.closest('[data-newinst]');
+  if (ni) { const h = state.results[+ni.dataset.newinst]; const sg = suggestFor(h); return openCreate(false, { name: h.title, ...sg, mod: h }); }
   const b = e.target.closest('[data-install]'); if (!b) return;
   const h = state.results[+b.dataset.install];
   b.disabled = true; b.textContent = 'Installing…';
@@ -283,16 +347,58 @@ function renderInstalled() {
   $('#installed-list').innerHTML = mods.length ? mods.map(m => `
     <div class="mod">
       ${m.icon ? `<img src="${esc(m.icon)}" alt="">` : '<div class="noimg"></div>'}
-      <div class="body"><h4>${esc(m.title)}</h4><span class="by">${esc(m.version)} · from ${m.source === 'modrinth' ? 'Modrinth' : 'CurseForge'} · ${esc(m.file)}</span></div>
+      <div class="body"><h4>${esc(m.title)}</h4><span class="by">${esc(m.version)} · ${({ modrinth: 'from Modrinth', curseforge: 'from CurseForge', file: 'added from a file', maker: 'made with Mod Maker' })[m.source] || ''} · ${esc(m.file)}</span></div>
       <button class="btn btn-ghost danger" data-remove="${esc(m.file)}">Remove</button>
     </div>`).join('')
     : '<div class="loading">No mods yet. Head to <b>Browse mods</b> to add some!</div>';
 }
+async function addFiles(files) {
+  if (!state.current) return;
+  try {
+    const r = await lab.addModFiles({ instanceId: state.current.id, files });
+    if (!r) return;
+    state.current = r.instance; updateCounts(); renderInstalled();
+    toast(r.added.length ? `Added ${r.added.map(a => a.title).join(', ')}` : 'Only .jar files can be added.', r.added.length ? 'ok' : 'err');
+  } catch (e) { toast(errMsg(e), 'err'); }
+}
+$('#add-jar').onclick = () => addFiles(null);
+let dragDepth = 0;
+const canDrop = () => state.current && !$('#inst-view').classList.contains('hidden') && state.current.loader !== 'vanilla';
+window.addEventListener('dragenter', e => { if (!canDrop() || !e.dataTransfer?.types.includes('Files')) return; dragDepth++; $('#drop-inst').textContent = state.current.name; $('#drop-hint').classList.remove('hidden'); });
+window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('#drop-hint').classList.add('hidden'); } });
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => {
+  e.preventDefault(); dragDepth = 0; $('#drop-hint').classList.add('hidden');
+  if (!canDrop()) return;
+  const files = [...(e.dataTransfer?.files || [])].map(f => lab.filePath(f)).filter(Boolean);
+  if (files.length) { setTab('installed'); addFiles(files); }
+});
 $('#installed-list').onclick = async e => {
   const b = e.target.closest('[data-remove]'); if (!b) return;
   state.current = await lab.removeMod({ instanceId: state.current.id, file: b.dataset.remove });
   updateCounts(); renderInstalled(); toast('Mod removed');
 };
+
+// ---------- speed boost ----------
+async function runBoost(id, quiet) {
+  const b = $('#iv-boost');
+  const mine = () => state.current?.id === id;
+  if (mine()) { b.disabled = true; b.textContent = '⚡ Boosting…'; }
+  try {
+    const r = await lab.speedBoost(id);
+    if (mine()) { state.current = r.instance; updateCounts(); updateBoost(); if (!$('#tab-installed').classList.contains('hidden')) renderInstalled(); renderResults(); }
+    toast(r.added.length ? `⚡ Speed Boost added ${r.added.join(', ')}` : '⚡ Speed Boost is already on', 'ok');
+    if (!quiet || r.skipped.length) Notes.add({ kind: 'mod', title: '⚡ Speed Boost on', body: `${r.added.length} speed mods added${r.skipped.length ? ` (${r.skipped.length} not made for this version yet)` : ''}`, action: { type: 'instance', id } });
+  } catch (e) { toast(errMsg(e), 'err'); if (mine()) updateBoost(); }
+}
+lab.onSpeedProgress(p => { const b = $('#iv-boost'); if (b.disabled) b.textContent = `⚡ Boosting ${p.done}/${p.total}…`; });
+function updateBoost() {
+  const i = state.current, b = $('#iv-boost');
+  b.classList.toggle('hidden', i.loader === 'vanilla');
+  b.disabled = !!i.boosted;
+  b.textContent = i.boosted ? '⚡ Boosted' : '⚡ Speed Boost';
+}
+$('#iv-boost').onclick = () => runBoost(state.current.id);
 
 // ---------- instance actions ----------
 $('#iv-folder').onclick = () => lab.openFolder(state.current.id);

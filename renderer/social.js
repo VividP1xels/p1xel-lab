@@ -573,11 +573,8 @@
 
   function openChat(u) { S.active = u; showFriends(); }
   function showFriends() {
+    showView('friends');
     S.open = true;
-    document.body.classList.add('friends-open');
-    $('#nav-friends').classList.add('active');
-    $('#inst-view').classList.add('hidden'); $('#empty-state').classList.add('hidden');
-    $('#friends-view').classList.remove('hidden');
     renderChat(); renderList();
   }
   function closeFriends() {
@@ -613,5 +610,7 @@
     S.peer?.destroy(); S.peer = null; S.conns = {}; S.status = {}; S.active = null; S.data = null;
     closeFriends();
   }
-  window.Social = { start, stop, close: closeFriends, renderMe, openChat };
+  const friendsList = () => S.data ? friends().filter(f => f.state === 'friend').sort((a, b) => a.name.localeCompare(b.name)) : [];
+  const sendText = (u, text) => { if (rel(u) === 'friend') sendMessage(u, { text: String(text).slice(0, 2000) }); };
+  window.Social = { start, stop, close: closeFriends, renderMe, openChat, friendsList, sendText };
 })();
