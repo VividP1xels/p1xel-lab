@@ -1303,6 +1303,7 @@ ipcMain.handle('maker:delete', (_e, uid) => fsp.rm(path.join(MM_ROOT(), `${path.
 const ID = s => String(s).toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'thing';
 const mcId = s => { s = String(s || '').trim().toLowerCase(); if (!s) return ''; if (!/^[a-z0-9_.-]+(:[a-z0-9_./-]+)?$/.test(s)) throw new Error(`"${s}" isn't a valid item id.`); return s.includes(':') ? s : 'minecraft:' + s; };
 const text = (t, color) => JSON.stringify({ text: String(t), italic: false, ...(color ? { color } : {}) });
+const KIND_BASE_VALUES = new Set(['netherite_sword', 'netherite_pickaxe', 'netherite_axe', 'netherite_shovel', 'netherite_hoe']);
 function makerSupports(mc) { return newerOrSame(mc, '1.21') && !newerOrSame(mc, '1.21.5'); } // custom items
 const datapackSupports = mc => newerOrSame(mc, '1.13'); // commands, kits, tweaks
 // Data pack format number for each Minecraft version
@@ -1319,15 +1320,41 @@ function buildModFiles(mod, mc) {
   if ((mod.items || []).length && !makerSupports(mc)) throw new Error('Custom items work on Minecraft 1.21 to 1.21.4. Commands, kits and tweaks work on 1.13+.');
   if (mod.tweaks?.spooky && !newerOrSame(mc, '1.15')) throw new Error('Spooky nights need Minecraft 1.15 or newer.');
   const files = {};
-  const put = (p, obj) => { files[p] = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2); };
+  const put = (p, obj) => { files[p] = typeof obj === 'string' || Buffer.isBuffer(obj) ? obj : JSON.stringify(obj, null, 2); };
   // custom items + recipes
-  for (const it of mod.items || []) {
-    const iid = ID(it.name);
-    const grid = (it.grid || []).slice(0, 9).map(mcId);
+  // ----- custom items: materials (like a new ingot), tools, weapons and armor -----
+  const items = mod.items || [];
+  const iidOf = it => ID(it.name || it.displayName);
+  // Each new material rides on a hidden item that survival players can't otherwise get, so recipes can tell it apart
+  const CARRIERS = ['command_block', 'repeating_command_block', 'chain_command_block', 'structure_block', 'jigsaw', 'debug_stick'];
+  const materials = items.filter(it => it.kind === 'material');
+  if (materials.length > CARRIERS.length) throw new Error(`You can make up to ${CARRIERS.length} new materials per mod.`);
+  const matBase = {};
+  materials.forEach((it, i) => { matBase[iidOf(it)] = 'minecraft:' + CARRIERS[i]; });
+  const ingredient = x => {
+    if (!x) return '';
+    if (x.startsWith('@')) {
+      const id = ID(x.slice(1));
+      if (!matBase[id]) throw new Error(`"${x}" isn't one of your materials. Make it a Material item first.`);
+      return matBase[id];
+    }
+    return mcId(x);
+  };
+  const KIND_BASE = { sword: 'netherite_sword', pickaxe: 'netherite_pickaxe', axe: 'netherite_axe', shovel: 'netherite_shovel', hoe: 'netherite_hoe', helmet: 'netherite_helmet', chestplate: 'netherite_chestplate', leggings: 'netherite_leggings', boots: 'netherite_boots' };
+  const ARMOR_SLOT = { helmet: 'head', chestplate: 'chest', leggings: 'legs', boots: 'feet' };
+  const TOOL_TAG = { pickaxe: '#minecraft:mineable/pickaxe', axe: '#minecraft:mineable/axe', shovel: '#minecraft:mineable/shovel', hoe: '#minecraft:mineable/hoe' };
+  const HANDHELD = new Set(['sword', 'pickaxe', 'axe', 'shovel', 'hoe']);
+  const itemModel = newerOrSame(mc, '1.21.4'); // 1.21.4+: item_model; older: custom_model_data overrides
+  const overrides = {}; // base item -> [{cmd, model}]
+  items.forEach((it, index) => {
+    const iid = iidOf(it);
+    const kind = it.kind || 'other';
+    const base = kind === 'material' ? matBase[iid] : KIND_BASE[kind] ? 'minecraft:' + KIND_BASE[kind] : mcId(it.base || 'minecraft:stick');
+    const grid = (it.grid || []).slice(0, 9).map(ingredient);
     while (grid.length < 9) grid.push('');
     let rows = [0, 1, 2].map(r => grid.slice(r * 3, r * 3 + 3));
     rows = rows.filter(r => r.some(Boolean));
-    if (!rows.length) throw new Error(`"${it.name}" needs a crafting recipe.`);
+    if (!rows.length) throw new Error(`"${it.displayName || it.name}" needs a crafting recipe.`);
     const cols = [0, 1, 2].filter(c => rows.some(r => r[c]));
     rows = rows.map(r => cols.map(c => r[c]));
     const keyOf = {}, letters = 'ABCDEFGHI'.split('');
@@ -1336,24 +1363,58 @@ function buildModFiles(mod, mc) {
     for (const [item, k] of Object.entries(keyOf)) key[k] = newRecipes ? item : { item };
     const comps = {};
     const color = /^#[0-9a-f]{6}$/i.test(it.color || '') ? it.color.toLowerCase() : (it.color || 'white');
-    if (it.displayName) comps['minecraft:custom_name'] = text(it.displayName, color);
+    comps['minecraft:custom_name'] = text(it.displayName || it.name || 'Custom item', color);
     if (it.lore) comps['minecraft:lore'] = [text(it.lore, /^#[0-9a-f]{6}$/i.test(it.loreColor || '') ? it.loreColor : 'gray')];
     const ench = {};
     for (const e of it.enchantments || []) if (e.id && e.level > 0) ench[mcId(e.id)] = Math.min(255, Math.max(1, Math.round(e.level)));
     if (Object.keys(ench).length) comps['minecraft:enchantments'] = { levels: ench };
-    if (it.damage > 0) {
-      const attr = n => (newRecipes ? 'minecraft:' : 'minecraft:generic.') + n;
-      comps['minecraft:attribute_modifiers'] = { modifiers: [
-        { type: attr('attack_damage'), id: `${modid}:${iid}_damage`, amount: Math.max(0, Number(it.damage) - 1), operation: 'add_value', slot: 'mainhand' },
-        { type: attr('attack_speed'), id: `${modid}:${iid}_speed`, amount: -2.4, operation: 'add_value', slot: 'mainhand' },
-      ] };
+    const st = it.stats || {};
+    const attr = n => (newRecipes ? 'minecraft:' : 'minecraft:generic.') + n;
+    const mods = [];
+    if (HANDHELD.has(kind) || (kind === 'other' && it.damage > 0)) {
+      const dmg = Number(kind === 'other' ? it.damage : st.damage) || 0;
+      const spd = Number(st.speed) || 1.6;
+      if (dmg > 0) mods.push({ type: attr('attack_damage'), id: `${modid}:${iid}_damage`, amount: Math.max(0, dmg - 1), operation: 'add_value', slot: 'mainhand' });
+      mods.push({ type: attr('attack_speed'), id: `${modid}:${iid}_speed`, amount: +(spd - 4).toFixed(2), operation: 'add_value', slot: 'mainhand' });
     }
-    if (it.glow) comps['minecraft:enchantment_glint_override'] = true;
+    if (ARMOR_SLOT[kind]) {
+      const slot = ARMOR_SLOT[kind];
+      mods.push({ type: attr('armor'), id: `${modid}:${iid}_armor`, amount: Number(st.armor) || 0, operation: 'add_value', slot });
+      mods.push({ type: attr('armor_toughness'), id: `${modid}:${iid}_toughness`, amount: Number(st.toughness) || 0, operation: 'add_value', slot });
+      if (Number(st.kb) > 0) mods.push({ type: attr('knockback_resistance'), id: `${modid}:${iid}_kb`, amount: Number(st.kb), operation: 'add_value', slot });
+    }
+    if (mods.length) comps['minecraft:attribute_modifiers'] = { modifiers: mods };
+    if (TOOL_TAG[kind] && Number(st.mining) > 0) comps['minecraft:tool'] = { rules: [{ blocks: '#minecraft:incorrect_for_netherite_tool', correct_for_drops: false }, { blocks: TOOL_TAG[kind], speed: Number(st.mining), correct_for_drops: true }], default_mining_speed: 1, damage_per_block: 1 };
+    if ((HANDHELD.has(kind) || ARMOR_SLOT[kind]) && Number(st.durability) > 0) comps['minecraft:max_damage'] = Math.min(100000, Math.round(Number(st.durability)));
+    if (kind === 'material') { comps['minecraft:max_stack_size'] = 64; comps['minecraft:enchantment_glint_override'] = !!it.glow; }
+    else if (it.glow) comps['minecraft:enchantment_glint_override'] = true;
+    if (it.fireproof) { if (newRecipes) comps['minecraft:damage_resistant'] = { types: '#minecraft:is_fire' }; else comps['minecraft:fire_resistant'] = {}; }
     if (it.unbreakable) comps['minecraft:unbreakable'] = {};
+    // the item's own texture
+    if (String(it.texture || '').startsWith('data:image/png;base64,')) {
+      const parent = HANDHELD.has(kind) ? 'minecraft:item/handheld' : 'minecraft:item/generated';
+      put(`assets/${modid}/textures/item/${iid}.png`, Buffer.from(it.texture.split(',')[1], 'base64'));
+      put(`assets/${modid}/models/item/${iid}.json`, { parent, textures: { layer0: `${modid}:item/${iid}` } });
+      if (itemModel) {
+        put(`assets/${modid}/items/${iid}.json`, { model: { type: 'minecraft:model', model: `${modid}:item/${iid}` } });
+        comps['minecraft:item_model'] = `${modid}:${iid}`;
+      } else {
+        const cmd = 7100 + index;
+        comps['minecraft:custom_model_data'] = cmd;
+        (overrides[base] ||= []).push({ predicate: { custom_model_data: cmd }, model: `${modid}:item/${iid}` });
+      }
+    }
     put(`data/${modid}/recipe/${iid}.json`, {
-      type: 'minecraft:crafting_shaped', category: 'equipment', pattern, key,
-      result: { id: mcId(it.base || 'minecraft:stick'), count: Math.min(64, Math.max(1, Number(it.count) || 1)), ...(Object.keys(comps).length ? { components: comps } : {}) },
+      type: 'minecraft:crafting_shaped', category: kind === 'material' ? 'misc' : 'equipment', pattern, key,
+      result: { id: base, count: Math.min(64, Math.max(1, Number(it.count) || 1)), components: comps },
     });
+  });
+  // Older versions: add our models to the base item's model as overrides
+  const CARRIER_MODEL = { debug_stick: { parent: 'minecraft:item/handheld', textures: { layer0: 'minecraft:item/stick' } } };
+  for (const [base, list] of Object.entries(overrides)) {
+    const name = base.replace('minecraft:', '');
+    const def = CARRIER_MODEL[name] || (CARRIERS.includes(name) ? { parent: `minecraft:block/${name}` } : { parent: KIND_BASE_VALUES.has(name) && /sword|pickaxe|axe|shovel|hoe/.test(name) ? 'minecraft:item/handheld' : 'minecraft:item/generated', textures: { layer0: `minecraft:item/${name}` } });
+    put(`assets/minecraft/models/item/${name}.json`, { ...def, overrides: list.sort((a, b) => a.predicate.custom_model_data - b.predicate.custom_model_data) });
   }
   // gameplay tweaks
   const load = [], tick = [];
@@ -1408,25 +1469,36 @@ function modJarBuffer(mod, mc) {
   if (!makerSupports(mc)) throw new Error('Mod Maker mods work on Minecraft 1.21 to 1.21.4.');
   const { modid, files } = buildModFiles(mod, mc);
   const zip = new AdmZip();
-  for (const [p, c] of Object.entries(files)) zip.addFile(p, Buffer.from(c, 'utf8'));
+  for (const [p, c] of Object.entries(files)) zip.addFile(p, Buffer.isBuffer(c) ? c : Buffer.from(c, 'utf8'));
   if (mod.icon?.startsWith('data:image/png;base64,')) zip.addFile(`assets/${modid}/icon.png`, Buffer.from(mod.icon.split(',')[1], 'base64'));
   return { modid, buf: zip.toBuffer(), files: Object.keys(files) };
 }
 ipcMain.handle('maker:preview', (_e, { mod, mcVersion }) => Object.keys(buildModFiles(mod, mcVersion).files));
-async function writeMakerDatapack(mod, mc, dir) {
-  const { modid, buf } = makerDatapack(mod, mc);
+async function writeMakerDatapack(mod, mc, dir, rpDir) {
+  const { modid, buf, rpBuf } = makerDatapack(mod, mc);
   const file = `${modid}.zip`;
   await fsp.mkdir(dir, { recursive: true });
   await fsp.writeFile(path.join(dir, file), buf);
-  return { modid, file };
+  let rpFile = null;
+  if (rpBuf && rpDir) { rpFile = `${modid}-textures.zip`; await fsp.mkdir(rpDir, { recursive: true }); await fsp.writeFile(path.join(rpDir, rpFile), rpBuf); }
+  return { modid, file, rpFile, rpBuf };
+}
+async function enableResourcePack(instId, file) {
+  const opt = path.join(instDir(instId), 'options.txt');
+  let text = fs.existsSync(opt) ? await fsp.readFile(opt, 'utf8') : '';
+  const entry = `"file/${file}"`;
+  if (/^resourcePacks:/m.test(text)) { if (!text.includes(entry)) text = text.replace(/^resourcePacks:\[(.*)\]$/m, (m, list) => `resourcePacks:[${list ? list + ',' : '"vanilla",'}${entry}]`); }
+  else text += `${text && !text.endsWith('\n') ? '\n' : ''}resourcePacks:["vanilla",${entry}]\n`;
+  await fsp.writeFile(opt, text);
 }
 ipcMain.handle('maker:install', async (_e, { mod, instanceId }) => {
   const inst = await readInstance(instanceId);
   if (!['fabric', 'quilt'].includes(inst.loader) || !makerSupports(inst.mcVersion)) {
     // Works on any loader and Vanilla: added as a data pack (goes into every world when you press Play)
-    const { modid, file } = await writeMakerDatapack(mod, inst.mcVersion, path.join(instDir(inst.id), 'datapacks'));
+    const { modid, file, rpFile } = await writeMakerDatapack(mod, inst.mcVersion, path.join(instDir(inst.id), 'datapacks'), path.join(instDir(inst.id), 'resourcepacks'));
     inst.mods = (inst.mods || []).filter(m => !(m.source === 'maker' && m.projectId === modid));
     inst.mods.push({ source: 'maker', projectId: modid, title: mod.name, icon: mod.icon || '', version: mod.version || '1.0.0', file, type: 'datapack' });
+    if (rpFile) { inst.mods.push({ source: 'maker', projectId: modid + '-textures', title: `${mod.name} textures`, icon: '', version: mod.version || '1.0.0', file: rpFile, type: 'resourcepack' }); await enableResourcePack(inst.id, rpFile); }
     await writeInstance(inst);
     return { instance: inst, file, asDatapack: true, fabricApi: 'present' };
   }
@@ -1661,9 +1733,17 @@ async function exportMrpack(instanceId, { name, version, summary }) {
 function makerDatapack(mod, mc) {
   const { modid, files } = buildModFiles(mod, mc);
   const zip = new AdmZip();
-  for (const [p, c] of Object.entries(files)) if (p !== 'fabric.mod.json') zip.addFile(p, Buffer.from(c, 'utf8'));
-  if (mod.icon?.startsWith('data:image/png;base64,')) zip.addFile('pack.png', Buffer.from(mod.icon.split(',')[1], 'base64'));
-  return { modid, buf: zip.toBuffer() };
+  const rp = new AdmZip();
+  let hasAssets = false;
+  for (const [p, c] of Object.entries(files)) {
+    const buf = Buffer.isBuffer(c) ? c : Buffer.from(c, 'utf8');
+    if (p.startsWith('assets/')) { rp.addFile(p, buf); hasAssets = true; }
+    else if (p !== 'fabric.mod.json') zip.addFile(p, buf);
+  }
+  if (mod.icon?.startsWith('data:image/png;base64,')) { const icon = Buffer.from(mod.icon.split(',')[1], 'base64'); zip.addFile('pack.png', icon); rp.addFile('pack.png', icon); }
+  // Textures for custom items come in a matching resource pack
+  rp.addFile('pack.mcmeta', Buffer.from(JSON.stringify({ pack: { pack_format: rpFormat(mc), description: `${mod.name} textures` } }, null, 2)));
+  return { modid, buf: zip.toBuffer(), rpBuf: hasAssets ? rp.toBuffer() : null };
 }
 // Get the file ready to save or publish. kind: mod | modpack | resourcepack | datapack | shader
 ipcMain.handle('publish:prepare', async (_e, { kind, from, makerMod, instanceId, mcVersion, name, version, summary }) => {
@@ -1765,7 +1845,8 @@ ipcMain.handle('instances:anyVersion', async (_e, id) => {
 // Mod Maker -> server: data pack in the world; on Paper also real /commands through commands.yml
 ipcMain.handle('maker:installServer', async (_e, { mod, serverId }) => {
   const { s: srv, t } = await serverTarget(serverId);
-  const { modid, file } = await writeMakerDatapack(mod, srv.mcVersion, path.join(t.__root, t.__dirs.datapack));
+  const { modid, file, rpFile } = await writeMakerDatapack(mod, srv.mcVersion, path.join(t.__root, t.__dirs.datapack), path.join(t.__root, t.__dirs.resourcepack));
+  if (rpFile) { srv.content = srv.content.filter(m => m.file !== rpFile); srv.content.push({ source: 'file', projectId: rpFile, title: `${mod.name} textures`, icon: '', version: 'Player Pack', file: rpFile, type: 'resourcepack' }); }
   srv.content = srv.content.filter(m => !(m.source === 'maker' && m.projectId === modid));
   srv.content.push({ source: 'maker', projectId: modid, title: mod.name, icon: '', version: mod.version || '1.0.0', file, type: 'datapack' });
   const cmds = (mod.commands || []).filter(c => c.everyone !== false).map(c => String(c.name).toLowerCase().replace(/^\//, '')).filter(n => CMD_NAME.test(n));

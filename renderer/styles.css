@@ -439,3 +439,8 @@ i.real { font-style: normal; font-weight: 400; color: var(--muted); font-size: 1
 .shot img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; cursor: zoom-in; }
 .shot figcaption { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; font-size: 11px; color: var(--muted); } .shot figcaption span { display: flex; gap: 4px; }
 .vis { display: flex; flex-direction: column; gap: 2px; } .vis small { color: var(--muted); }
+.set-maker { border-color: #a24bff66; background: linear-gradient(120deg, #a24bff14, transparent); }
+.set-maker .row { flex-wrap: wrap; align-items: center; } .set-maker input { flex: 1; min-width: 180px; } .set-maker select { width: auto; }
+.kind-sel { width: auto; margin-left: auto; margin-right: 8px; }
+.tex-cv { width: 160px; height: 160px; image-rendering: pixelated; border: 2px solid var(--line); border-radius: 4px; cursor: crosshair; touch-action: none; display: block; margin: 6px 0; }
+.mm-item-grid { grid-template-columns: 240px 1fr; }
