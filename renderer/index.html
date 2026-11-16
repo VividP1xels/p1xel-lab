@@ -150,6 +150,7 @@
           <button class="tab" data-tab="worlds">Worlds</button>
           <button class="tab" data-tab="shots">Screenshots</button>
           <button class="tab" data-tab="log">Game log</button>
+          <button class="tab" data-tab="opts">⚙ Options</button>
         </div>
 
         <div class="tab-body" id="tab-browse">
@@ -185,7 +186,11 @@
         </div>
         <div class="tab-body hidden" id="tab-worlds"></div>
         <div class="tab-body hidden" id="tab-shots"></div>
-        <div class="tab-body hidden" id="tab-log"><pre id="log" class="log">Press Play and the game output will show up here.</pre></div>
+        <div class="tab-body hidden" id="tab-log">
+          <div class="log-tools"><input id="log-q" placeholder="🔍 Search the log…"><label class="check sm"><input type="checkbox" id="log-err"> Only errors &amp; warnings</label><button class="btn btn-ghost" id="log-copy">📋 Copy</button></div>
+          <pre id="log" class="log">Press Play and the game output will show up here.</pre>
+        </div>
+        <div class="tab-body hidden" id="tab-opts"></div>
       </div>
       <div id="servers-view" class="hidden"></div>
       <div id="profile-view" class="hidden"></div>
@@ -265,6 +270,10 @@
         <button class="btn btn-ghost" value="tutorial" id="s-tutorial">Replay tutorial</button>
         <button class="btn btn-ghost" id="s-update">Check for updates</button>
       </div>
+      <label class="check"><input type="checkbox" id="s-hide"> Hide P1xel Lab while Minecraft is open (it comes back when you quit)</label>
+      <label class="check"><input type="checkbox" id="s-notify"> Tell me when friends come online</label>
+      <label class="field"><span>Take-a-break reminder</span><select id="s-break"><option value="0">Off</option><option value="30">Every 30 minutes</option><option value="60">Every hour</option><option value="90">Every 1½ hours</option><option value="120">Every 2 hours</option></select></label>
+      <button class="btn btn-ghost" id="s-storage" type="button">🧹 Storage cleaner</button>
       <div class="field"><span>Theme</span><div class="theme-picks" id="s-presets"></div></div>
       <div class="field"><span>Launcher color</span><div class="row"><button type="button" class="cp-btn" id="s-theme" style="--c:#a24bff"><i></i>RGB</button><button class="btn btn-ghost" id="s-theme-reset" type="button">Default</button></div>
         <button class="btn btn-ghost danger" value="logout" id="s-logout">Sign out</button>

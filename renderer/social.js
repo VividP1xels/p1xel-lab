@@ -23,6 +23,7 @@
   // ---------- my status (from the Wi-Fi / network connection) ----------
   function myStatus() {
     if (!navigator.onLine) return { s: 'offline', label: 'Offline' };
+    if (S.dnd) return { s: 'dnd', label: '🔕 Do not disturb' };
     if (S.playing) return { s: 'playing', label: `Playing ${S.playing}` };
     return { s: 'online', label: 'Online' };
   }
@@ -277,7 +278,8 @@
     if (mine !== 'friend') return; // everything below is friends-only
     switch (d.t) {
       case 'status':
-        S.status[u] = { s: d.s === 'playing' ? 'playing' : 'online', game: String(d.game || '').slice(0, 40) };
+        { const was = S.status[u]; S.status[u] = { s: ['playing', 'dnd'].includes(d.s) ? d.s : 'online', game: String(d.game || '').slice(0, 40) };
+          if (!was && !S.dnd && state.settings.notifyOnline !== false && (Date.now() - (S.startedAt || 0)) > 8000) { toast(`🟢 ${nameOf(u)} is online`); notify(`${nameOf(u)} is online`, 'Say hi in P1xel Lab!'); } }
         renderAll(); return;
       case 'getstatus': {
         const st = myStatus();
@@ -297,7 +299,7 @@
           if (!(S.open && S.active === u && document.hasFocus())) {
             S.data.unread[u] = (S.data.unread[u] || 0) + 1;
             notify(nameOf(u), msg.share ? `shared "${msg.share.name}" with you` : msg.text);
-            if (!(S.open && S.active === u)) toast(`💬 ${nameOf(u)}: ${msg.share ? 'shared an instance' : msg.text.slice(0, 60)}`);
+            if (!(S.open && S.active === u)) if (!S.dnd) toast(`💬 ${nameOf(u)}: ${msg.share ? 'shared an instance' : msg.text.slice(0, 60)}`);
             if (msg.share) Notes.add({ kind: 'share', title: `${nameOf(u)} shared "${msg.share.name}"`, body: `${msg.share.mods.length} mods · Minecraft ${msg.share.mcVersion}`, action: { type: 'chat', uuid: u } });
             else {
               const who = nameOf(u);
@@ -390,7 +392,7 @@
     renderAll();
   }
   function notify(title, body) {
-    if (document.hasFocus()) return;
+    if (document.hasFocus() || S.dnd) return;
     try { new Notification(title, { body: String(body).slice(0, 120), silent: false }); } catch {}
   }
 
@@ -505,7 +507,7 @@
   function onIncomingCall(call) {
     const u = call.peer.slice(PREFIX.length);
     if (rel(u) !== 'friend' || !ready(u)) { call.close(); return; }
-    if (S.call) { S.conns[u].send({ t: 'busy' }); call.close(); return; }
+    if (S.call || S.dnd) { S.conns[u].send({ t: 'busy' }); call.close(); if (S.dnd) Notes.add({ kind: 'call', title: `Missed call from ${nameOf(u)}`, body: 'You were on Do Not Disturb.', action: { type: 'chat', uuid: u } }); return; }
     S.call = { uuid: u, call, video: !!call.metadata?.video, state: 'incoming' };
     wireCall(call);
     ring(true);
@@ -597,7 +599,7 @@
     if (rel(u) !== 'friend') return { s: 'offline', label: '' };
     const st = S.status[u];
     if (!st || !ready(u)) return { s: 'offline', label: 'Offline' };
-    return st.s === 'playing' ? { s: 'playing', label: `Playing ${st.game}` } : { s: 'online', label: 'Online' };
+    return st.s === 'playing' ? { s: 'playing', label: `Playing ${st.game}` } : st.s === 'dnd' ? { s: 'dnd', label: '🔕 Do not disturb' } : { s: 'online', label: 'Online' };
   }
   function renderAll() { renderBadge(); if (S.open) { renderList(); renderChat(); } }
   function renderBadge() {
@@ -792,6 +794,8 @@
 
   // ---------- start / stop ----------
   async function start() {
+    S.startedAt = Date.now();
+    try { S.dnd = localStorage.getItem('p1xellab-dnd') === '1'; } catch {}
     S.me = await lab.social.me();
     if (!S.me) return;
     S.data = (await lab.social.load()) || {};
@@ -811,6 +815,12 @@
   const friendsList = () => S.data ? friends().filter(f => f.state === 'friend').sort((a, b) => a.name.localeCompare(b.name)) : [];
   const sendShare = (u, share) => { if (rel(u) === 'friend') sendMessage(u, { share: cleanShare(share) }); };
   const sendText = (u, text) => { if (rel(u) === 'friend') sendMessage(u, { text: String(text).slice(0, 2000) }); };
+  // click your status in the sidebar to switch Do Not Disturb on/off
+  document.querySelector('.account').addEventListener('click', e => {
+    if (!e.target.closest('#my-status, #my-dot')) return;
+    S.dnd = !S.dnd; try { localStorage.setItem('p1xellab-dnd', S.dnd ? '1' : '0'); } catch {}
+    renderMe(); broadcastStatus(); toast(S.dnd ? '🔕 Do Not Disturb is on: no pop-ups, and calls are declined.' : '🔔 Do Not Disturb is off.');
+  });
   window.Social = { start, stop, close: closeFriends, renderMe, openChat, friendsList, sendText, sendShare, sendFile, nameOf, realName,
     profile: () => S.data ? myProfile() : null,
     saveProfile: p => { Object.assign(myProfile(), p); save(); for (const f of friends()) if (f.state === 'friend' && ready(f.uuid)) { S.conns[f.uuid].send({ t: 'profile', profile: profileOut() }); if (p.visibility === 'friends') S.conns[f.uuid].send({ t: 'posts-index', posts: myPostsIndex() }); } changed(); },

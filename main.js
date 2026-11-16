@@ -168,11 +168,15 @@ ipcMain.handle('store:get', () => {
     javaPath: s.javaPath || '',
     accent: s.accent || '',
     themePreset: s.themePreset || 'purple',
+    hideOnPlay: !!s.hideOnPlay,
+    breakMinutes: s.breakMinutes ?? 0,
+    notifyOnline: s.notifyOnline !== false,
+    lastSeenVersion: s.lastSeenVersion || '',
   };
 });
 ipcMain.handle('store:set', (_e, patch) => {
   const allowed = {};
-  for (const k of ['tutorialDone', 'ramMB', 'javaPath', 'accent', 'themePreset']) if (k in patch) allowed[k] = patch[k];
+  for (const k of ['tutorialDone', 'ramMB', 'javaPath', 'accent', 'themePreset', 'hideOnPlay', 'breakMinutes', 'notifyOnline', 'lastSeenVersion']) if (k in patch) allowed[k] = patch[k];
   if ('curseforgeKey' in patch) saveSecret('cfKey', patch.curseforgeKey || '');
   writeStore(allowed);
   return true;
@@ -278,6 +282,9 @@ ipcMain.handle('instances:update', async (_e, { id, patch }) => {
   if ('favorite' in patch) inst.favorite = !!patch.favorite;
   if ('name' in patch && String(patch.name).trim()) inst.name = String(patch.name).trim().slice(0, 40);
   if ('gamerules' in patch) inst.gamerules = patch.gamerules;
+  if ('ramMB' in patch) inst.ramMB = patch.ramMB ? Math.max(1024, Math.min(65536, Math.round(Number(patch.ramMB)))) : null;
+  if ('window' in patch) inst.window = patch.window ? { width: Math.max(320, Math.min(7680, Math.round(Number(patch.window.width) || 854))), height: Math.max(240, Math.min(4320, Math.round(Number(patch.window.height) || 480))), fullscreen: !!patch.window.fullscreen } : null;
+  if ('notes' in patch) inst.notes = String(patch.notes || '').slice(0, 5000);
   return writeInstance(inst);
 });
 ipcMain.handle('instances:duplicate', async (_e, id) => {
@@ -740,6 +747,21 @@ async function fetchLoaderProfile(loader, mcVersion, pinned) {
   await fsp.writeFile(path.join(dir, `${id}.json`), JSON.stringify(profile));
   return id;
 }
+// #11 Safe mode: hide every mod while the game runs (Minecraft skips files that don't end in .jar)
+const SAFE_EXT = '.p1xsafe';
+async function safeModsOff(id) {
+  const d = path.join(instDir(id), 'mods'); if (!fs.existsSync(d)) return 0;
+  let n = 0; for (const f of await fsp.readdir(d)) if (/\.jar$/i.test(f)) { await fsp.rename(path.join(d, f), path.join(d, f + SAFE_EXT)); n++; }
+  return n;
+}
+async function safeModsBack(id) {
+  const d = path.join(instDir(id), 'mods'); if (!fs.existsSync(d)) return;
+  for (const f of await fsp.readdir(d)) if (f.endsWith(SAFE_EXT)) await fsp.rename(path.join(d, f), path.join(d, f.slice(0, -SAFE_EXT.length))).catch(() => {});
+}
+// If P1xel Lab closed during safe mode, put the mods back next time
+app.whenReady().then(async () => { try { for (const id of await fsp.readdir(INST_ROOT())) if (!running.has(id)) await safeModsBack(id); } catch {} });
+const safeNext = new Set();
+ipcMain.handle('game:safe', (_e, id) => { safeNext.add(id); return true; });
 ipcMain.handle('game:launch', async (_e, id) => {
   if (!currentUser) throw new Error('Sign in with Microsoft first.');
   if (running.has(id)) throw new Error('That instance is already running.');
@@ -761,7 +783,9 @@ ipcMain.handle('game:launch', async (_e, id) => {
   let joinArgs = {};
   if (join?.type === 'singleplayer' && newerOrSame(inst.mcVersion, '1.20')) joinArgs = { quickPlay: { type: 'singleplayer', identifier: join.identifier } };
   else if (join?.type === 'multiplayer') joinArgs = newerOrSame(inst.mcVersion, '1.20') ? { quickPlay: { type: 'multiplayer', identifier: join.identifier } } : { customLaunchArgs: ['--server', join.identifier.split(':')[0], '--port', join.identifier.split(':')[1] || '25565'] };
-  const ram = Math.max(1024, Number(store.ramMB) || 4096);
+  const ram = Math.max(1024, Number(inst.ramMB) || Number(store.ramMB) || 4096);
+  const safe = safeNext.delete(id);
+  if (safe) { const n = await safeModsOff(id); send('launch:log', { id, line: `[P1xel Lab] 🛟 Safe mode: ${n} mods turned off for this session.` }); }
   const launcher = new Client();
   launcher.on('progress', p => send('launch:status', { id, stage: `Downloading ${p.type}…`, pct: p.total ? p.task / p.total : 0 }));
   launcher.on('debug', m => send('launch:log', { id, line: String(m) }));
@@ -769,6 +793,8 @@ ipcMain.handle('game:launch', async (_e, id) => {
   const startedAt = Date.now();
   launcher.on('close', async code => {
     running.delete(id); playing = running.size ? playing : null;
+    if (safe) await safeModsBack(id);
+    if (readStore().hideOnPlay && win && !win.isDestroyed() && !win.isVisible()) { win.show(); win.focus(); }
     try { const i2 = await readInstance(id); i2.playtime = (i2.playtime || 0) + Math.max(0, Date.now() - startedAt); await writeInstance(i2); } catch {}
     send('launch:closed', { id, code });
   });
@@ -779,12 +805,14 @@ ipcMain.handle('game:launch', async (_e, id) => {
     ...(forge ? { forge } : {}),
     ...joinArgs,
     memory: { max: `${ram}M`, min: '1024M' },
+    ...(inst.window ? { window: { width: inst.window.width, height: inst.window.height, fullscreen: inst.window.fullscreen } } : {}),
     javaPath,
     overrides: { gameDirectory: instDir(id), detached: false, maxSockets: 32 }, // download 32 files at once (default was 2)
     customArgs: FAST_JVM,
   });
-  if (!proc) throw new Error('Minecraft failed to start — check the log.');
+  if (!proc) { if (safe) await safeModsBack(id); throw new Error('Minecraft failed to start — check the log.'); }
   running.set(id, proc);
+  if (store.hideOnPlay && win && !win.isDestroyed()) setTimeout(() => { if (running.has(id)) win.hide(); }, 4000);
   playing = inst.name;
   inst.lastPlayed = Date.now();
   await writeInstance(inst);
@@ -2848,4 +2876,41 @@ ipcMain.handle('adv:addPluginElement', async (_e, { project, pluginId, key, valu
   meta.elements.push({ id, kind: `${pl.id}:${key}`, name: vals.name, plugin: pl.name }); meta.updated = Date.now();
   await fsp.writeFile(path.join(dir, 'p1xel-project.json'), JSON.stringify(meta, null, 2));
   return { meta, written, id };
+});
+
+// ---------- #93 what's new ----------
+ipcMain.handle('update:notes', async (_e, version) => {
+  if (!/^\d+\.\d+\.\d+$/.test(version)) return null;
+  try { const r = await getJSON(`https://api.github.com/repos/${REPO}/releases/tags/v${version}`, { Accept: 'application/vnd.github+json' }); return { version, notes: String(r.body || '').replace(/\n---[\s\S]*$/, '').slice(0, 4000) }; }
+  catch { return null; }
+});
+ipcMain.handle('app:version', () => app.getVersion());
+
+// ---------- #98 storage cleaner ----------
+async function sizeOf(p) { try { const st = await fsp.stat(p); return st.isDirectory() ? dirSize(p) : st.size; } catch { return 0; } }
+async function storageGroups() {
+  const inst = fs.existsSync(INST_ROOT()) ? await fsp.readdir(INST_ROOT()) : [];
+  const logs = [], crashes = [];
+  for (const id of inst) { logs.push(path.join(instDir(id), 'logs')); crashes.push(path.join(instDir(id), 'crash-reports')); }
+  const srvs = fs.existsSync(SRV_ROOT()) ? await fsp.readdir(SRV_ROOT()) : [];
+  for (const id of srvs) logs.push(path.join(srvDir(id), 'logs'));
+  return {
+    logs: { label: '📄 Game and server logs', paths: logs },
+    crashes: { label: '💥 Crash reports', paths: crashes },
+    icons: { label: '🖼 Saved mod pictures (they download again when needed)', paths: [ICONS()] },
+    temp: { label: '📦 Leftover export and upload files', paths: [path.join(app.getPath('temp'), 'p1xel-publish')] },
+    received: { label: '📎 Files friends sent you', paths: [RECEIVED()] },
+    builds: { label: '🧪 Advanced mode build files (rebuilt next time)', paths: fs.existsSync(ADV_ROOT()) ? (await fsp.readdir(ADV_ROOT())).flatMap(d => [path.join(ADV_ROOT(), d, 'build'), path.join(ADV_ROOT(), d, '.gradle')]) : [] },
+  };
+}
+ipcMain.handle('storage:scan', async () => {
+  const g = await storageGroups(), out = {};
+  for (const [k, v] of Object.entries(g)) { let n = 0; for (const p of v.paths) n += await sizeOf(p); out[k] = { label: v.label, size: n }; }
+  const total = await sizeOf(DATA());
+  return { groups: out, total };
+});
+ipcMain.handle('storage:clean', async (_e, keys) => {
+  const g = await storageGroups(); let freed = 0;
+  for (const k of keys || []) for (const p of g[k]?.paths || []) { freed += await sizeOf(p); await fsp.rm(p, { recursive: true, force: true }); }
+  return freed;
 });

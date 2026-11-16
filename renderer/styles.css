@@ -482,3 +482,16 @@ i.real { font-style: normal; font-weight: 400; color: var(--muted); font-size: 1
 .inst-head .inst-meta h2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .inst-head .inst-actions { flex: 1 1 100%; flex-wrap: wrap; justify-content: flex-start; }
 .inst-head .inst-actions .btn-play { margin-left: auto; }
+
+/* ---------- batch 2 ---------- */
+.log-tools { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; } .log-tools input[type=text], .log-tools #log-q { flex: 1; }
+#tab-opts .row { display: flex; gap: 6px; align-items: center; } #tab-opts .row input { width: 100px; }
+.clean-row { justify-content: flex-start; } .clean-row b { margin-left: auto; color: var(--cyan); font-weight: 600; }
+.status-dot.dnd { background: var(--red); } small.dnd { color: var(--red) !important; }
+#my-status, #my-dot { cursor: pointer; } #my-status:hover { text-decoration: underline; }
+.stat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.stat { text-align: center; margin: 0; } .stat span { font-size: 26px; } .stat b { display: block; font: 700 26px Silkscreen, monospace; } .stat small { color: var(--muted); }
+.bar-row { display: grid; grid-template-columns: 28px 160px 1fr 80px; gap: 10px; align-items: center; padding: 6px 0; } .bar-row .bn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .bar-row .bar { margin: 0; height: 10px; border-radius: 5px; overflow: hidden; } .bar-row b { text-align: right; font-size: 13px; }
+#settings { max-height: 90vh; overflow: auto; }
+#settings .check { white-space: normal; align-items: flex-start; margin-top: 10px; }
+#settings #s-storage { margin-top: 10px; }

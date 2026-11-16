@@ -52,6 +52,7 @@ async function onSignedIn(user) {
   applyPreset(state.settings.themePreset); applyTheme(state.settings.accent);
   state.instances = await lab.listInstances();
   Social.start().then(() => Profile.renderAccount());
+  setTimeout(whatsNew, 1500);
   Notes.start();
   if (user.offline) toast("You're offline. Showing your saved stuff until you reconnect.");
   if (!state.settings.tutorialDone) startTutorial();
@@ -293,7 +294,9 @@ $('#check-upd').onclick = async () => {
 };
 function setTab(t) {
   $$('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === t));
-  ['browse', 'installed', 'worlds', 'shots', 'log'].forEach(k => $('#tab-' + k).classList.toggle('hidden', k !== t));
+  ['browse', 'installed', 'worlds', 'shots', 'log', 'opts'].forEach(k => $('#tab-' + k).classList.toggle('hidden', k !== t));
+  if (t === 'opts') renderOpts();
+  if (t === 'log') renderLog();
   if (t === 'installed') renderInstalled();
   if (t === 'worlds') renderWorlds();
   if (t === 'shots') renderShots();
@@ -569,6 +572,7 @@ $('#iv-play').onclick = async () => {
 lab.onLaunchStatus(s => {
   if (s.id && s.id !== state.current?.id) { if (s.stage === 'running') launchState[s.id] = 'running'; return; }
   if (s.stage === 'running') {
+    startBreakTimer();
     launchState[state.current.id] = 'running'; setPlayState('running');
     $('#launch-bar').classList.add('hidden'); toast('Minecraft is starting — have fun!', 'ok'); return;
   }
@@ -578,9 +582,10 @@ lab.onLaunchStatus(s => {
 });
 lab.onLaunchLog(({ id, line }) => {
   logs[id] = ((logs[id] || '') + line + '\n').slice(-200000);
-  if (state.current?.id === id) { const el = $('#log'); el.textContent = logs[id]; el.scrollTop = el.scrollHeight; }
+  if (state.current?.id === id && !$('#tab-log').classList.contains('hidden')) renderLog();
 });
 lab.onLaunchClosed(({ id, code }) => {
+  clearInterval(breakTimer);
   launchState[id] = null;
   if (state.current?.id === id) setPlayState(null);
   if (code && code !== 0) {
@@ -605,6 +610,7 @@ $('#btn-settings').onclick = async () => {
   renderPresets();
   $('#s-ram').value = state.settings.ramMB; $('#ram-val').textContent = (state.settings.ramMB / 1024).toFixed(1) + ' GB';
   $('#s-java').value = state.settings.javaPath; $('#s-cf').value = '';
+  $('#s-hide').checked = !!state.settings.hideOnPlay; $('#s-notify').checked = state.settings.notifyOnline !== false; $('#s-break').value = String(state.settings.breakMinutes || 0);
   $('#s-cf-state').textContent = state.settings.curseforgeKeySet ? '(saved ✓)' : '(not set)';
   $('#settings').showModal();
 };
@@ -612,7 +618,8 @@ $('#s-ram').oninput = e => { $('#ram-val').textContent = (e.target.value / 1024)
 $('#settings').addEventListener('close', async () => {
   const v = $('#settings').returnValue;
   if (v === 'save') {
-    const patch = { ramMB: +$('#s-ram').value, javaPath: $('#s-java').value.trim() };
+    const patch = { ramMB: +$('#s-ram').value, javaPath: $('#s-java').value.trim(), hideOnPlay: $('#s-hide').checked, notifyOnline: $('#s-notify').checked, breakMinutes: +$('#s-break').value };
+    Object.assign(state.settings, patch);
     if ($('#s-cf').value.trim()) patch.curseforgeKey = $('#s-cf').value.trim();
     await lab.setSettings(patch); toast('Settings saved', 'ok');
   } else if (v === 'tutorial') startTutorial();
@@ -709,6 +716,84 @@ async function gameruleForm(box, current, mc, onSave, note) {
   box.querySelector('[data-rules-reset]').onclick = () => { box.querySelectorAll('[data-rule]').forEach(el => { el.value = ''; }); onSave({}); };
 }
 window.gameruleForm = gameruleForm;
+
+
+// ========== batch 2 ==========
+// #6 #7 #11 #15 instance options
+async function renderOpts() {
+  const i = state.current, box = $('#tab-opts'), w = i.window || {};
+  box.innerHTML = `<div class="srv-grid">
+    <div class="srv-box"><b>🧠 Memory for this instance</b>
+      <label class="check"><input type="checkbox" id="o-ram-own" ${i.ramMB ? 'checked' : ''}> Use its own amount (instead of Settings)</label>
+      <div class="ram-row"><input type="range" id="o-ram" min="1024" max="16384" step="512" value="${i.ramMB || state.settings.ramMB || 4096}" ${i.ramMB ? '' : 'disabled'}><b id="o-ram-v"></b></div>
+      <p class="fine">Big modpacks like 6–8 GB. Small ones are happy with 3–4 GB.</p></div>
+    <div class="srv-box"><b>🖥 Game window</b>
+      <label class="check"><input type="checkbox" id="o-win-own" ${i.window ? 'checked' : ''}> Choose the window size</label>
+      <div class="row"><input type="number" id="o-w" min="320" max="7680" value="${w.width || 1280}" ${i.window ? '' : 'disabled'}> × <input type="number" id="o-h" min="240" max="4320" value="${w.height || 720}" ${i.window ? '' : 'disabled'}></div>
+      <label class="check"><input type="checkbox" id="o-full" ${w.fullscreen ? 'checked' : ''} ${i.window ? '' : 'disabled'}> Start in fullscreen</label></div>
+    <div class="srv-box"><b>🛟 Safe mode</b><p class="fine">Something crashing? Play once with <b>every mod turned off</b> to see if a mod is the problem. Your mods come back when you quit.</p>
+      <button class="btn btn-ghost" id="o-safe">🛟 Play in safe mode</button></div>
+    <div class="srv-box"><b>📝 Notes</b><textarea id="o-notes" rows="6" maxlength="5000" placeholder="Seed, coordinates of your base, mods to try, anything…">${esc(i.notes || '')}</textarea><span class="fine" id="o-notes-s"></span></div>
+  </div>`;
+  const ramV = () => { $('#o-ram-v').textContent = (+$('#o-ram').value / 1024).toFixed(1) + ' GB'; };
+  ramV();
+  const saveRam = async () => { state.current = await lab.updateInstance({ id: i.id, patch: { ramMB: $('#o-ram-own').checked ? +$('#o-ram').value : null } }); };
+  $('#o-ram-own').onchange = () => { $('#o-ram').disabled = !$('#o-ram-own').checked; saveRam(); };
+  $('#o-ram').oninput = ramV; $('#o-ram').onchange = saveRam;
+  const saveWin = async () => { const on = $('#o-win-own').checked; ['#o-w', '#o-h', '#o-full'].forEach(s => { $(s).disabled = !on; }); state.current = await lab.updateInstance({ id: i.id, patch: { window: on ? { width: +$('#o-w').value, height: +$('#o-h').value, fullscreen: $('#o-full').checked } : null } }); };
+  ['#o-win-own', '#o-w', '#o-h', '#o-full'].forEach(s => { $(s).onchange = saveWin; });
+  $('#o-safe').onclick = async () => { await lab.safeMode(i.id); $('#iv-play').click(); toast('🛟 Starting in safe mode: all mods are off for this session.'); };
+  let nt; $('#o-notes').oninput = () => { clearTimeout(nt); $('#o-notes-s').textContent = 'Saving…'; nt = setTimeout(async () => { state.current = await lab.updateInstance({ id: i.id, patch: { notes: $('#o-notes').value } }); $('#o-notes-s').textContent = '✓ Saved'; }, 600); };
+}
+// #16 log search
+function renderLog() {
+  const id = state.current?.id; if (!id) return;
+  const q = $('#log-q').value.trim().toLowerCase(), errs = $('#log-err').checked;
+  let lines = (logs[id] || '').split('\n');
+  if (errs) lines = lines.filter(l => /error|warn|exception|crash|failed|caused by/i.test(l));
+  if (q) lines = lines.filter(l => l.toLowerCase().includes(q));
+  const el = $('#log'); el.textContent = lines.join('\n') || (logs[id] ? 'Nothing matches.' : 'Press Play and the game output will show up here.'); el.scrollTop = el.scrollHeight;
+}
+$('#log-q').oninput = renderLog; $('#log-err').onchange = renderLog;
+$('#log-copy').onclick = () => { navigator.clipboard.writeText($('#log').textContent); toast('Log copied! Paste it when you ask for help.', 'ok'); };
+// #19 take-a-break reminders
+let breakTimer = null;
+function startBreakTimer() {
+  clearInterval(breakTimer);
+  const mins = Number(state.settings.breakMinutes) || 0; if (!mins) return;
+  let n = 0;
+  breakTimer = setInterval(() => {
+    n++;
+    const msg = `You've been playing for ${n * mins >= 60 ? ((n * mins) / 60).toFixed(n * mins % 60 ? 1 : 0) + ' hour' + (n * mins > 60 ? 's' : '') : n * mins + ' minutes'}. Time for a quick break? Stretch and drink some water 💧`;
+    try { new Notification('P1xel Lab: take a break', { body: msg }); } catch {}
+    toast('⏰ ' + msg); Notes.add({ kind: 'game', title: 'Time for a break?', body: msg });
+  }, mins * 60000);
+}
+// #98 storage cleaner
+const fmtSize = b => b > 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
+$('#s-storage').onclick = async () => {
+  const d = $('#mod-dlg'); // reuse a dialog
+  d.innerHTML = `<div class="dlg"><h3 class="pix">🧹 Storage cleaner</h3><p class="fine">Looking…</p></div>`; $('#settings').close(); d.showModal();
+  const r = await lab.storage.scan();
+  d.innerHTML = `<div class="dlg"><h3 class="pix">🧹 Storage cleaner</h3><p class="muted">P1xel Lab uses <b>${fmtSize(r.total)}</b> in total. Your worlds, mods and settings are never touched here.</p>
+    ${Object.entries(r.groups).map(([k, g]) => `<label class="check clean-row"><input type="checkbox" value="${k}" ${['logs', 'crashes', 'temp', 'builds'].includes(k) && g.size ? 'checked' : ''} ${g.size ? '' : 'disabled'}> ${g.label}<b>${fmtSize(g.size)}</b></label>`).join('')}
+    <div class="dlg-row end"><button class="btn btn-ghost" id="cl-cancel">Cancel</button><button class="btn btn-primary" id="cl-go">Clean up</button></div></div>`;
+  $('#cl-cancel').onclick = () => d.close();
+  $('#cl-go').onclick = async () => { const keys = [...d.querySelectorAll('input:checked')].map(x => x.value); const freed = await lab.storage.clean(keys); d.close(); toast(`🧹 Freed ${fmtSize(freed)}!`, 'ok'); };
+};
+// #93 what's new
+async function whatsNew() {
+  const v = await Promise.resolve(lab.appVersion?.()).catch(() => null); if (!v) return;
+  const seen = state.settings.lastSeenVersion;
+  lab.setSettings({ lastSeenVersion: v }); state.settings.lastSeenVersion = v;
+  if (!seen || seen === v) return;
+  const r = await lab.updateNotes(v); if (!r?.notes) return;
+  const d = $('#mod-dlg');
+  d.innerHTML = `<div class="dlg"><div class="upd-top"><span>${Pixels.logo(56)}</span><div><h3 class="pix">What's new</h3><p class="muted">P1xel Lab v${esc(v)}</p></div></div>
+    <div class="upd-notes">${esc(r.notes).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^- /gm, '• ')}</div><div class="dlg-row end"><button class="btn btn-primary" id="wn-ok">Let's go!</button></div></div>`;
+  $('#wn-ok').onclick = () => d.close();
+  d.showModal();
+}
 
 // ---------- boot ----------
 window.addEventListener('DOMContentLoaded', async () => {

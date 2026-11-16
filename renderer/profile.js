@@ -18,10 +18,10 @@
         <div><h2>${esc(pr.displayName || me.name)}</h2><span class="muted">@${esc(me.name)}${pr.status ? ' · ' + esc(pr.status) : ''}</span>${pr.bio ? `<p>${linkify(pr.bio)}</p>` : ''}</div>
         <span class="vis-pill">${pr.visibility === 'friends' ? '👥 Visible to friends' : '🔒 Private'}</span>
       </div>
-      <div class="tabs">${[['feed', '📰 Feed'], ['edit', '✏️ Edit profile'], ['mine', '🗂 My posts']].map(([k, t]) => `<button class="tab ${P.tab === k ? 'active' : ''}" data-ptab="${k}">${t}</button>`).join('')}</div>
+      <div class="tabs">${[['feed', '📰 Feed'], ['edit', '✏️ Edit profile'], ['mine', '🗂 My posts'], ['stats', '📊 Stats']].map(([k, t]) => `<button class="tab ${P.tab === k ? 'active' : ''}" data-ptab="${k}">${t}</button>`).join('')}</div>
       <div id="pf-body"></div>`;
     v.querySelector('.tabs').onclick = e => { const t = e.target.closest('[data-ptab]'); if (t) open(t.dataset.ptab); };
-    ({ feed: tabFeed, edit: tabEdit, mine: tabMine })[P.tab]();
+    ({ feed: tabFeed, edit: tabEdit, mine: tabMine, stats: tabStats })[P.tab]();
   }
 
   // ---------- feed ----------
@@ -143,6 +143,19 @@
     const pr = Social.profile(), me = Social.me();
     if (!pr || !me) return;
     $('#acc-name').textContent = pr.displayName || me.name;
+  }
+  // #18 playtime + launcher stats
+  async function tabStats() {
+    const insts = await lab.listInstances();
+    const total = insts.reduce((a, i) => a + (i.playtime || 0), 0);
+    const hm = ms => { const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60; return h ? `${h}h ${m}m` : `${m}m`; };
+    const top = insts.filter(i => i.playtime).sort((a, b) => b.playtime - a.playtime);
+    const max = top[0]?.playtime || 1;
+    const mods = insts.reduce((a, i) => a + (i.mods || []).filter(m => (m.type || 'mod') === 'mod').length, 0);
+    const makers = (await lab.maker.list().catch(() => [])).length;
+    const cards = [['⏱', hm(total), 'played in P1xel Lab'], ['🎮', insts.length, 'instances'], ['🧩', mods, 'mods installed'], ['👥', (Social.friendsList?.() || []).length, 'friends'], ['📰', Social.myPosts().length, 'posts'], ['🛠', makers, 'creations']];
+    $('#pf-body').innerHTML = `<div class="stat-cards">${cards.map(([i, n, l]) => `<div class="srv-card stat"><span>${i}</span><b>${n}</b><small>${l}</small></div>`).join('')}</div>
+      <div class="srv-card"><b>Most played</b>${top.length ? top.slice(0, 10).map(i => `<div class="bar-row"><span class="inst-icon">${Pixels.block(i.icon, 24)}</span><span class="bn">${esc(i.name)}</span><div class="bar"><i style="width:${Math.max(3, i.playtime / max * 100)}%"></i></div><b>${hm(i.playtime)}</b></div>`).join('') : '<p class="fine">Play something to see your stats here!</p>'}</div>`;
   }
   window.Profile = { open, showFriend, renderAccount };
 })();
