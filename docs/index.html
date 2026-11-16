@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>P1xel Lab</title>
+  <meta name="description" content="P1xel Lab: the free Minecraft launcher for modding, by VividP1xels. Mods, shaders, servers, friends, and an MCreator-style Advanced mode.">
+  <link rel="icon" href="icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg: #0d0b14; --panel: #161322; --panel2: #1e1a2e; --line: #2c2642; --text: #ece8ff; --muted: #9a93b8; --purple: #a24bff; --cyan: #36f0e0; --pink: #ff3fd2; --green: #4ade80; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 Inter, system-ui, sans-serif; }
+    a { color: var(--cyan); }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+    .pix { font-family: Silkscreen, monospace; letter-spacing: .5px; }
+    nav { position: sticky; top: 0; z-index: 10; background: #0d0b14e6; backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+    nav .wrap { display: flex; align-items: center; gap: 18px; height: 60px; }
+    nav .logo { display: flex; align-items: center; gap: 10px; font: 700 20px Silkscreen, monospace; text-decoration: none; color: var(--text); }
+    nav .logo img { width: 30px; height: 30px; image-rendering: pixelated; }
+    nav .logo span { color: var(--cyan); }
+    nav .links { margin-left: auto; display: flex; gap: 18px; font-size: 14px; }
+    nav .links a { color: var(--muted); text-decoration: none; } nav .links a:hover { color: var(--text); }
+    .btn { display: inline-flex; align-items: center; gap: 8px; font: 700 15px Inter, sans-serif; text-decoration: none; padding: 12px 20px; border-radius: 6px; border: 2px solid #000; box-shadow: 0 4px 0 #07050c; color: #fff; background: var(--panel2); transition: transform .06s, filter .15s; }
+    .btn:hover { filter: brightness(1.12); } .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #07050c; }
+    .btn.main { background: linear-gradient(90deg, #5cf08f, #2fbf63); color: #04220f; font-family: Silkscreen, monospace; font-size: 17px; padding: 14px 24px; }
+    .btn.ghost { background: transparent; border-color: var(--line); box-shadow: none; }
+    header.hero { position: relative; overflow: hidden; padding: 80px 0 70px; text-align: center; }
+    .hero::before { content: ''; position: absolute; inset: 0; background-image: linear-gradient(#ffffff08 1px, transparent 1px), linear-gradient(90deg, #ffffff08 1px, transparent 1px); background-size: 32px 32px; mask-image: radial-gradient(circle at 50% 30%, #000 20%, transparent 75%); }
+    .hero > * { position: relative; }
+    .hero img.big { width: 120px; height: 120px; image-rendering: pixelated; filter: drop-shadow(0 0 30px #a24bff99); animation: bob 2.6s ease-in-out infinite; }
+    @keyframes bob { 50% { transform: translateY(-8px); } }
+    .hero h1 { font: 700 clamp(40px, 8vw, 76px)/1.05 Silkscreen, monospace; margin: 18px 0 8px; }
+    .hero h1 span { color: var(--cyan); }
+    .hero p.tag { font-size: clamp(17px, 2.4vw, 21px); color: #cfc9ea; max-width: 680px; margin: 0 auto 28px; }
+    .dl { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .other { margin-top: 14px; font-size: 14px; color: var(--muted); }
+    .other a { margin: 0 6px; }
+    .yt { display: inline-flex; align-items: center; gap: 8px; color: #ff4e4e; font-weight: 700; text-decoration: none; margin-top: 22px; }
+    section { padding: 64px 0; border-top: 1px solid var(--line); }
+    h2 { font: 700 clamp(26px, 4vw, 36px) Silkscreen, monospace; margin: 0 0 8px; }
+    .sub { color: var(--muted); margin: 0 0 28px; max-width: 720px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+    .card { background: var(--panel); border: 2px solid var(--line); border-radius: 10px; padding: 18px; }
+    .card .ico { font-size: 28px; }
+    .card h3 { margin: 8px 0 4px; font-size: 17px; }
+    .card p { margin: 0; color: #cfc9ea; font-size: 14px; }
+    .adv { background: linear-gradient(135deg, #a24bff22, #36f0e011); border: 2px solid #a24bff66; border-radius: 14px; padding: 28px; display: grid; grid-template-columns: 1.1fr 1fr; gap: 28px; align-items: center; }
+    .adv ul { margin: 0; padding-left: 20px; color: #cfc9ea; } .adv li { margin: 6px 0; }
+    .code { background: #07050c; border: 2px solid var(--line); border-radius: 10px; padding: 16px; font: 13px/1.6 ui-monospace, Consolas, monospace; color: #bdb6dc; overflow-x: auto; white-space: pre; }
+    .code .k { color: #c792ea; } .code .s { color: #c3e88d; } .code .c { color: #676e95; }
+    .plugin { display: flex; gap: 14px; align-items: flex-start; }
+    .plugin .ico { font-size: 30px; line-height: 1; }
+    .plugin small { color: var(--muted); display: block; margin-top: 4px; }
+    .plugin .btn { padding: 6px 12px; font-size: 13px; margin-top: 10px; box-shadow: 0 2px 0 #07050c; }
+    .steps { counter-reset: s; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .steps div { background: var(--panel); border: 2px solid var(--line); border-radius: 10px; padding: 16px 16px 16px 56px; position: relative; font-size: 14px; color: #cfc9ea; }
+    .steps div::before { counter-increment: s; content: counter(s); position: absolute; left: 14px; top: 14px; width: 30px; height: 30px; border-radius: 6px; background: var(--purple); color: #fff; font: 700 15px Silkscreen, monospace; display: flex; align-items: center; justify-content: center; }
+    .steps b { color: var(--text); }
+    footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--muted); font-size: 13px; }
+    footer .wrap { display: flex; gap: 16px; flex-wrap: wrap; justify-content: space-between; }
+    @media (max-width: 760px) { .adv { grid-template-columns: 1fr; } nav .links { display: none; } header.hero { padding: 56px 0 50px; } }
+  </style>
+</head>
+<body>
+  <nav><div class="wrap">
+    <a class="logo" href="#"><img src="icon.png" alt="">P1xel <span>Lab</span></a>
+    <div class="links"><a href="#features">Features</a><a href="#advanced">Advanced mode</a><a href="#plugins">Plugins</a><a href="#make-plugin">Make a plugin</a></div>
+  </div></nav>
+
+  <header class="hero"><div class="wrap">
+    <img class="big" src="icon.png" alt="P1xel Lab logo">
+    <h1>P1xel <span>Lab</span></h1>
+    <p class="tag">The free Minecraft launcher made for modding. Find mods, shaders and modpacks, host servers, play with friends, and make your own mods, even real Java ones.</p>
+    <div class="dl" id="dl"></div>
+    <div class="other">Also for: <a href="https://github.com/VividP1xels/p1xel-lab/releases/latest/download/P1xel-Lab-Setup.exe">Windows</a>·<a href="https://github.com/VividP1xels/p1xel-lab/releases/latest/download/P1xel-Lab-Mac.dmg">Mac</a>·<a href="https://github.com/VividP1xels/p1xel-lab/releases/latest/download/P1xel-Lab-Linux.AppImage">Linux (AppImage)</a>·<a href="https://github.com/VividP1xels/p1xel-lab/releases/latest/download/P1xel-Lab-Linux.deb">Linux (.deb)</a></div>
+    <a class="yt" href="https://www.youtube.com/@VividP1xels" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M23 7.2a3 3 0 0 0-2.1-2.1C19 4.6 12 4.6 12 4.6s-7 0-8.9.5A3 3 0 0 0 1 7.2 31 31 0 0 0 .5 12 31 31 0 0 0 1 16.8a3 3 0 0 0 2.1 2.1c1.9.5 8.9.5 8.9.5s7 0 8.9-.5a3 3 0 0 0 2.1-2.1 31 31 0 0 0 .5-4.8 31 31 0 0 0-.5-4.8zM9.7 15.1V8.9l5.8 3.1z"/></svg>Made by VividP1xels: subscribe!</a>
+  </div></header>
+
+  <section id="features"><div class="wrap">
+    <h2>Everything in one launcher</h2>
+    <p class="sub">Sign in with Microsoft, follow the quick tutorial, and you're modding in a minute.</p>
+    <div class="grid">
+      <div class="card"><div class="ico">🔍</div><h3>Mods, shaders &amp; modpacks</h3><p>Search Modrinth and CurseForge right in the launcher, with category filters (even 👻 Horror). Installs pick the right version for you.</p></div>
+      <div class="card"><div class="ico">⚡</div><h3>Speed Boost</h3><p>One click adds performance mods, so Minecraft starts faster and runs smoother. Quick Play jumps straight into your last world.</p></div>
+      <div class="card"><div class="ico">🖥</div><h3>Free servers</h3><p>Host Vanilla, Paper, Fabric, Forge or NeoForge servers on your own PC. Includes plugins, backups, game rules, and any-version joining.</p></div>
+      <div class="card"><div class="ico">👥</div><h3>Friends</h3><p>Add friends by Minecraft username. Chat, voice and video calls, emoji reactions, posts with pictures and videos, and modpack sharing.</p></div>
+      <div class="card"><div class="ico">🛠</div><h3>Create, no coding</h3><p>Make items, blocks, food, tools, armor, commands like /pixel, resource packs, shaders and skins, all in the launcher.</p></div>
+      <div class="card"><div class="ico">🚀</div><h3>Publish</h3><p>Upload your creations to Modrinth (public, unlisted or private) or send them privately to a friend.</p></div>
+      <div class="card"><div class="ico">🧑</div><h3>Skins &amp; profile</h3><p>Draw your skin and wear it in one click. Give yourself a launcher name, bio, and banner color.</p></div>
+      <div class="card"><div class="ico">🎨</div><h3>Make it yours</h3><p>Themes like Horror, Neon and Void, any RGB color, notifications, and automatic updates.</p></div>
+    </div>
+  </div></section>
+
+  <section id="advanced"><div class="wrap">
+    <div class="adv">
+      <div>
+        <h2>🧪 Advanced mode</h2>
+        <p class="sub" style="margin-bottom:14px">P1xel Lab's own take on MCreator. It opens in its own window and makes <b>real Java mods</b> for Fabric 1.21.1.</p>
+        <ul>
+          <li><b>Element buttons:</b> Item, Block, Food, Sword, Pickaxe. P1xel Lab writes the Java code, models, textures, loot and recipes.</li>
+          <li><b>Plugins</b> add more elements, like ores and enchantments.</li>
+          <li><b>A real code editor</b> for every file, with a pixel editor for textures.</li>
+          <li><b>🔨 Build</b> in one click (Java 21 and Gradle download automatically), then <b>▶ Add to instance</b> and play.</li>
+        </ul>
+      </div>
+      <div class="code"><span class="c">// Written for you by the Block button</span>
+<span class="k">public static final</span> Block VOIDWROUGHT_BLOCK =
+  register(<span class="s">"voidwrought_block"</span>, <span class="k">new</span> Block(
+    AbstractBlock.Settings.create()
+      .strength(<span class="s">5.0f</span>, <span class="s">6.0f</span>)
+      .requiresTool()
+      .luminance(state -> <span class="s">7</span>)
+      .sounds(BlockSoundGroup.METAL)));</div>
+    </div>
+  </div></section>
+
+  <section id="plugins"><div class="wrap">
+    <h2>🧩 Plugins</h2>
+    <p class="sub">Plugins add new element types to Advanced mode. In P1xel Lab, open <b>Create → 🧪 Advanced mode → 🧩 Plugins</b> and click <b>Install</b>. You can also download a plugin file here and use <b>Install from file</b>.</p>
+    <div class="grid" id="plugin-list"><p class="sub">Loading plugins…</p></div>
+  </div></section>
+
+  <section id="make-plugin"><div class="wrap">
+    <h2>Make your own plugin</h2>
+    <p class="sub">A plugin is one <code>.json</code> file of templates. It can add files, code to <code>ModItems</code>, <code>ModBlocks</code> or <code>ModMain</code>, tags and names. Plugins never run code inside P1xel Lab, so they're safe to install.</p>
+    <div class="steps">
+      <div><b>Copy an example.</b> Start from <a href="plugins/custom-ore.json">custom-ore.json</a> or <a href="plugins/custom-enchantment.json">custom-enchantment.json</a>.</div>
+      <div><b>Add fields</b> (text, number, select or bool) that show up in the element form.</div>
+      <div><b>Use placeholders</b> like <code>{{id}}</code>, <code>{{ID}}</code>, <code>{{modid}}</code>, <code>{{name}}</code> and your field ids in files and code.</div>
+      <div><b>Test it</b> with <b>Install from file</b>, then share it. Want it listed here? Send it to VividP1xels!</div>
+    </div>
+  </div></section>
+
+  <footer><div class="wrap">
+    <span>© P1xel Lab by VividP1xels. Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.</span>
+    <span><a href="https://github.com/VividP1xels/p1xel-lab">Source on GitHub</a> · <a href="https://github.com/VividP1xels/p1xel-lab/releases">All releases</a></span>
+  </div></footer>
+
+  <script>
+    // Big download button for the visitor's computer
+    const R = 'https://github.com/VividP1xels/p1xel-lab/releases/latest/download/';
+    const ua = navigator.userAgent;
+    const os = /Mac/i.test(ua) && !/iPhone|iPad/.test(ua) ? ['Mac', 'P1xel-Lab-Mac.dmg'] : /Linux/i.test(ua) && !/Android/i.test(ua) ? ['Linux', 'P1xel-Lab-Linux.AppImage'] : /Android|iPhone|iPad/i.test(ua) ? null : ['Windows', 'P1xel-Lab-Setup.exe'];
+    document.getElementById('dl').innerHTML = os
+      ? `<a class="btn main" href="${R + os[1]}">⬇ Download for ${os[0]}</a><a class="btn ghost" href="#features">See features</a>`
+      : `<a class="btn ghost" href="#features">P1xel Lab runs on Windows, Mac and Linux computers</a>`;
+    // Plugin gallery
+    fetch('plugins/index.json').then(r => r.json()).then(d => {
+      const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      document.getElementById('plugin-list').innerHTML = d.plugins.map(p => `<div class="card plugin"><div class="ico">${esc(p.icon || '🧩')}</div><div><h3 style="margin:0">${esc(p.name)}</h3><p>${esc(p.description)}</p><small>by ${esc(p.author)}</small><a class="btn ghost" href="${esc(p.url)}" download>⬇ Download file</a></div></div>`).join('');
+    }).catch(() => { document.getElementById('plugin-list').innerHTML = '<p class="sub">Couldn\'t load plugins.</p>'; });
+  </script>
+</body>
+</html>

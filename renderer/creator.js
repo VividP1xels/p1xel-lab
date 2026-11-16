@@ -6,9 +6,10 @@
 
   function open() {
     $('#maker-view').innerHTML = `
-      <div class="srv-head"><div><h2 class="pix">Create</h2></div></div>
+      <div class="srv-head"><div><h2 class="pix">Create</h2></div><button class="btn btn-adv" id="open-adv" title="P1xel Lab's own MCreator: real Java mods, in a second window">🧪 Advanced mode</button></div>
       <div class="type-chips create-nav">${[['items', '🧱 Items'], ['mods', '🧩 Mods & Data Packs'], ['rp', '🎨 Resource Packs'], ['shader', '✨ Shaders'], ['skin', '🧑 Skins'], ['modpack', '📦 Modpacks']].map(([k, t]) => `<button data-sec="${k}" class="${C.section === k ? 'active' : ''}">${t}</button>`).join('')}</div>
       <div id="create-body"></div>`;
+    $('#open-adv').onclick = () => lab.adv.open();
     $('.create-nav').onclick = e => { const b = e.target.closest('[data-sec]'); if (b) { C.section = b.dataset.sec; open(); } };
     ({ items: () => Maker.openItems(), mods: () => Maker.open(), rp: () => RP.open(), shader: () => SH.open(), skin: () => SK.open(), modpack: () => MP.open() })[C.section]();
   }

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'">
+  <title>P1xel Lab: Advanced mode</title>
+  <link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="vendor/cm/codemirror.css">
+  <link rel="stylesheet" href="vendor/cm/material-darker.css">
+  <link rel="stylesheet" href="advanced.css">
+</head>
+<body class="adv">
+  <header class="adv-top">
+    <div class="brand"><span id="adv-logo"></span><span class="logo sm">P1xel <span>Lab</span></span><span class="adv-pill">🧪 ADVANCED</span></div>
+    <select id="adv-project"></select>
+    <button class="btn btn-ghost" id="adv-new">+ New mod</button>
+    <span class="grow"></span>
+    <button class="btn btn-ghost" id="adv-plugins">🧩 Plugins</button>
+    <button class="btn btn-ghost" id="adv-folder">📂 Folder</button>
+    <button class="btn btn-primary" id="adv-build">🔨 Build</button>
+    <select id="adv-inst" title="Fabric 1.21.1 instance to test in"></select>
+    <button class="btn btn-play" id="adv-install">▶ Add to instance</button>
+  </header>
+  <div class="adv-main">
+    <aside class="adv-side">
+      <div class="side-label">Elements <span id="el-count"></span></div>
+      <div id="el-list" class="el-list"></div>
+      <div class="side-label">New element</div>
+      <div id="el-new" class="el-new"></div>
+      <div class="side-label">Files</div>
+      <div id="tree" class="tree"></div>
+    </aside>
+    <section class="adv-center">
+      <div class="adv-tabs" id="adv-tabs"></div>
+      <div id="adv-view" class="adv-view"></div>
+    </section>
+  </div>
+  <footer class="adv-console" id="adv-console">
+    <div class="console-head"><b>Console</b><span id="adv-stage"></span><div class="bar"><i id="adv-pct"></i></div><button class="link" id="console-clear">Clear</button><button class="link" id="console-toggle">▾</button></div>
+    <pre id="adv-log">Welcome to Advanced mode! Make a mod, add elements, then press 🔨 Build.</pre>
+  </footer>
+  <dialog id="adv-dlg"></dialog>
+  <div class="toast-host" id="toasts"></div>
+  <script src="pixels.js"></script>
+  <script src="colorpicker.js"></script>
+  <script src="vendor/cm/codemirror.js"></script>
+  <script src="vendor/cm/clike.js"></script>
+  <script src="vendor/cm/javascript.js"></script>
+  <script src="vendor/cm/closebrackets.js"></script>
+  <script src="vendor/cm/matchbrackets.js"></script>
+  <script src="advanced.js"></script>
+</body>
+</html>

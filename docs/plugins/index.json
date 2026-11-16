@@ -1,0 +1,20 @@
+{
+  "plugins": [
+    {
+      "id": "custom-ore",
+      "name": "Custom Ore",
+      "icon": "⛏",
+      "author": "VividP1xels",
+      "description": "Ores that spawn underground in your worlds",
+      "url": "https://vividp1xels.github.io/p1xel-lab/plugins/custom-ore.json"
+    },
+    {
+      "id": "custom-enchantment",
+      "name": "Custom Enchantment",
+      "icon": "✨",
+      "author": "VividP1xels",
+      "description": "Your own enchantments, from the enchanting table",
+      "url": "https://vividp1xels.github.io/p1xel-lab/plugins/custom-enchantment.json"
+    }
+  ]
+}

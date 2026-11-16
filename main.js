@@ -2417,3 +2417,435 @@ ipcMain.handle('gamerules:setServer', async (_e, { id, rules }) => {
   if (p) for (const l of lines) p.stdin.write(l + '\n');
   return { server: pub(srv), applied: lines.length, live: !!p };
 });
+
+// ==================== Advanced mode (MCreator-style): real Java mods ====================
+// Projects are real Fabric mods for Minecraft 1.21.1 (Yarn mappings), built with Gradle + Java 21.
+const ADV_ROOT = () => path.join(DATA(), 'advanced');
+const ADV_MC = '1.21.1';
+let advWin = null;
+const advSend = (ch, d) => advWin && !advWin.isDestroyed() && advWin.webContents.send(ch, d);
+ipcMain.handle('adv:open', () => {
+  if (advWin && !advWin.isDestroyed()) { advWin.focus(); return true; }
+  advWin = new BrowserWindow({
+    width: 1360, height: 860, minWidth: 1000, minHeight: 640, backgroundColor: '#0d0b14', title: 'P1xel Lab: Advanced mode',
+    icon: path.join(__dirname, 'renderer', 'icon.png'), autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+  });
+  advWin.loadFile(path.join(__dirname, 'renderer', 'advanced.html'));
+  advWin.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
+  return true;
+});
+const advDir = name => path.join(ADV_ROOT(), path.basename(name));
+const javaId = s => { let id = String(s).toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, ''); if (!/^[a-z]/.test(id)) id = 'm' + id; return id.slice(0, 40) || 'mymod'; };
+const CONST = id => id.toUpperCase();
+function advFile(project, rel) {
+  const base = advDir(project);
+  const out = path.resolve(base, rel);
+  if (!out.startsWith(path.resolve(base) + path.sep)) throw new Error('That file is outside the project.');
+  return out;
+}
+async function advMeta(project) { return JSON.parse(await fsp.readFile(path.join(advDir(project), 'p1xel-project.json'), 'utf8')); }
+ipcMain.handle('adv:list', async () => {
+  await fsp.mkdir(ADV_ROOT(), { recursive: true });
+  const out = [];
+  for (const d of await fsp.readdir(ADV_ROOT())) { try { out.push(await advMeta(d)); } catch {} }
+  return out.sort((a, b) => b.updated - a.updated);
+});
+async function latestVersions() {
+  const v = { yarn: '1.21.1+build.3', loader: '0.16.10', fabric: '0.116.0+1.21.1' };
+  try { v.yarn = (await getJSON(`${LOADER_META.fabric}/versions/yarn/${ADV_MC}`))[0].version; } catch {}
+  try { const l = await getJSON(`${LOADER_META.fabric}/versions/loader`); v.loader = (l.find(x => x.stable) || l[0]).version; } catch {}
+  try { const f = await getJSON(`${MR}/project/P7dR8mSH/version?game_versions=${encodeURIComponent(JSON.stringify([ADV_MC]))}&loaders=${encodeURIComponent('["fabric"]')}`); if (f[0]) v.fabric = f[0].version_number; } catch {}
+  return v;
+}
+ipcMain.handle('adv:create', async (_e, { name, author }) => {
+  const modid = javaId(name);
+  let folder = modid, n = 2;
+  while (fs.existsSync(advDir(folder))) folder = `${modid}_${n++}`;
+  const dir = advDir(folder), pkg = `com.p1xel.${modid}`, pkgPath = `src/main/java/com/p1xel/${modid}`;
+  const v = await latestVersions();
+  const files = {
+    'settings.gradle': `pluginManagement {\n    repositories {\n        maven { name = 'Fabric'; url = 'https://maven.fabricmc.net/' }\n        mavenCentral()\n        gradlePluginPortal()\n    }\n}\nrootProject.name = '${modid}'\n`,
+    'gradle.properties': `org.gradle.jvmargs=-Xmx2G\norg.gradle.parallel=true\n\nminecraft_version=${ADV_MC}\nyarn_mappings=${v.yarn}\nloader_version=${v.loader}\nfabric_version=${v.fabric}\n\nmod_version=1.0.0\nmaven_group=com.p1xel\narchives_base_name=${modid}\n`,
+    'build.gradle': `plugins {\n    id 'fabric-loom' version '1.9-SNAPSHOT'\n}\n\nversion = project.mod_version\ngroup = project.maven_group\nbase { archivesName = project.archives_base_name }\n\ndependencies {\n    minecraft "com.mojang:minecraft:\${project.minecraft_version}"\n    mappings "net.fabricmc:yarn:\${project.yarn_mappings}:v2"\n    modImplementation "net.fabricmc:fabric-loader:\${project.loader_version}"\n    modImplementation "net.fabricmc.fabric-api:fabric-api:\${project.fabric_version}"\n}\n\nprocessResources {\n    inputs.property "version", project.version\n    filesMatching("fabric.mod.json") { expand "version": project.version }\n}\n\ntasks.withType(JavaCompile).configureEach { it.options.release = 21 }\njava {\n    sourceCompatibility = JavaVersion.VERSION_21\n    targetCompatibility = JavaVersion.VERSION_21\n}\n`,
+    'src/main/resources/fabric.mod.json': JSON.stringify({ schemaVersion: 1, id: modid, version: '${version}', name, description: 'Made with P1xel Lab Advanced mode', authors: [author || 'Unknown'], license: 'All-Rights-Reserved', environment: '*', entrypoints: { main: [`${pkg}.ModMain`] }, depends: { fabricloader: '>=0.15.0', minecraft: `~${ADV_MC}`, java: '>=21', 'fabric-api': '*' } }, null, 2) + '\n',
+    [`src/main/resources/assets/${modid}/lang/en_us.json`]: JSON.stringify({ [`itemGroup.${modid}.main`]: name }, null, 2) + '\n',
+    [`${pkgPath}/ModMain.java`]: `package ${pkg};
+
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.itemgroup.v1.FabricItemGroup;
+import net.minecraft.item.ItemGroup;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.registry.Registries;
+import net.minecraft.registry.Registry;
+import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+// @p1xel:imports
+
+// Your mod starts here. P1xel Lab's element buttons add code to ModItems and ModBlocks for you.
+public class ModMain implements ModInitializer {
+    public static final String MOD_ID = "${modid}";
+    public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+
+    @Override
+    public void onInitialize() {
+        ModBlocks.register();
+        ModItems.register();
+        // A creative tab with everything from this mod
+        Registry.register(Registries.ITEM_GROUP, Identifier.of(MOD_ID, "main"), FabricItemGroup.builder()
+            .icon(() -> ModItems.ALL.isEmpty() ? new ItemStack(Items.DIAMOND) : new ItemStack(ModItems.ALL.get(0)))
+            .displayName(Text.translatable("itemGroup." + MOD_ID + ".main"))
+            .entries((context, entries) -> ModItems.ALL.forEach(entries::add))
+            .build());
+        // @p1xel:init
+        LOGGER.info("${name.replace(/"/g, '')} loaded!");
+    }
+}
+`,
+    [`${pkgPath}/ModItems.java`]: `package ${pkg};
+
+import java.util.ArrayList;
+import java.util.List;
+import net.minecraft.block.Block;
+import net.minecraft.component.type.FoodComponent;
+import net.minecraft.entity.effect.StatusEffectInstance;
+import net.minecraft.entity.effect.StatusEffects;
+import net.minecraft.item.*;
+import net.minecraft.recipe.Ingredient;
+import net.minecraft.registry.Registries;
+import net.minecraft.registry.Registry;
+import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.util.Identifier;
+
+public class ModItems {
+    public static final List<Item> ALL = new ArrayList<>();
+
+    // @p1xel:items (new items are added above this line)
+
+    public static Item register(String id, Item item) {
+        Item registered = Registry.register(Registries.ITEM, Identifier.of(ModMain.MOD_ID, id), item);
+        ALL.add(registered);
+        return registered;
+    }
+
+    public static void register() {
+        ModMain.LOGGER.info("Registering items");
+    }
+}
+`,
+    [`${pkgPath}/ModBlocks.java`]: `package ${pkg};
+
+import net.minecraft.block.AbstractBlock;
+import net.minecraft.block.Block;
+import net.minecraft.item.BlockItem;
+import net.minecraft.item.Item;
+import net.minecraft.registry.Registries;
+import net.minecraft.registry.Registry;
+import net.minecraft.sound.BlockSoundGroup;
+import net.minecraft.util.Identifier;
+
+public class ModBlocks {
+    // @p1xel:blocks (new blocks are added above this line)
+
+    public static Block register(String id, Block block) {
+        Block registered = Registry.register(Registries.BLOCK, Identifier.of(ModMain.MOD_ID, id), block);
+        ModItems.register(id, new BlockItem(registered, new Item.Settings()));
+        return registered;
+    }
+
+    public static void register() {
+        ModMain.LOGGER.info("Registering blocks");
+    }
+}
+`,
+    [`${pkgPath}/ModToolMaterial.java`]: `package ${pkg};
+
+import java.util.function.Supplier;
+import net.minecraft.block.Block;
+import net.minecraft.item.ToolMaterial;
+import net.minecraft.recipe.Ingredient;
+import net.minecraft.registry.tag.TagKey;
+
+// A tool material: how strong, fast and long-lasting your tools are
+public record ModToolMaterial(int durability, float speed, float damage, int enchantability, TagKey<Block> inverseTag, Supplier<Ingredient> repair) implements ToolMaterial {
+    @Override public int getDurability() { return durability; }
+    @Override public float getMiningSpeedMultiplier() { return speed; }
+    @Override public float getAttackDamage() { return damage; }
+    @Override public TagKey<Block> getInverseTag() { return inverseTag; }
+    @Override public int getEnchantability() { return enchantability; }
+    @Override public Ingredient getRepairIngredient() { return repair.get(); }
+}
+`,
+  };
+  for (const [rel, text] of Object.entries(files)) { const f = path.join(dir, rel); await fsp.mkdir(path.dirname(f), { recursive: true }); await fsp.writeFile(f, text); }
+  const meta = { folder, name, modid, pkg, mc: ADV_MC, created: Date.now(), updated: Date.now(), elements: [] };
+  await fsp.writeFile(path.join(dir, 'p1xel-project.json'), JSON.stringify(meta, null, 2));
+  return meta;
+});
+const SKIP = new Set(['build', '.gradle', 'run', '.idea', 'out', 'bin']);
+async function walk(base, rel = '') {
+  const out = [];
+  for (const e of await fsp.readdir(path.join(base, rel), { withFileTypes: true })) {
+    if (SKIP.has(e.name) || e.name === 'p1xel-project.json') continue;
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) out.push({ path: r, dir: true, children: await walk(base, r) });
+    else out.push({ path: r });
+  }
+  return out.sort((a, b) => (!!b.dir - !!a.dir) || a.path.localeCompare(b.path));
+}
+ipcMain.handle('adv:tree', async (_e, project) => ({ meta: await advMeta(project), tree: await walk(advDir(project)) }));
+ipcMain.handle('adv:read', async (_e, { project, file }) => {
+  const f = advFile(project, file);
+  if (/\.png$/i.test(f)) return { image: 'data:image/png;base64,' + (await fsp.readFile(f)).toString('base64') };
+  return { text: await fsp.readFile(f, 'utf8') };
+});
+ipcMain.handle('adv:write', async (_e, { project, file, text, image }) => {
+  const f = advFile(project, file);
+  await fsp.mkdir(path.dirname(f), { recursive: true });
+  if (image) await fsp.writeFile(f, Buffer.from(String(image).split(',')[1], 'base64'));
+  else await fsp.writeFile(f, String(text));
+  const m = await advMeta(project); m.updated = Date.now(); await fsp.writeFile(path.join(advDir(project), 'p1xel-project.json'), JSON.stringify(m, null, 2));
+  return true;
+});
+ipcMain.handle('adv:delete', async (_e, { project, file }) => { await fsp.rm(advFile(project, file), { recursive: true, force: true }); return true; });
+ipcMain.handle('adv:deleteProject', async (_e, project) => { await fsp.rm(advDir(project), { recursive: true, force: true }); return true; });
+ipcMain.handle('adv:folder', (_e, project) => shell.openPath(advDir(project)));
+
+// ----- element wizards: write the Java + JSON for you -----
+async function insertBefore(file, marker, code) {
+  let t = await fsp.readFile(file, 'utf8');
+  if (!t.includes(marker)) throw new Error(`Couldn't find "${marker}" in ${path.basename(file)}. Put that line back so P1xel Lab knows where to add code.`);
+  t = t.replace(marker, code + '\n    ' + marker);
+  await fsp.writeFile(file, t);
+}
+async function mergeJson(file, obj) {
+  let cur = {}; try { cur = JSON.parse(await fsp.readFile(file, 'utf8')); } catch {}
+  await fsp.mkdir(path.dirname(file), { recursive: true });
+  await fsp.writeFile(file, JSON.stringify({ ...cur, ...obj }, null, 2) + '\n');
+}
+async function addTag(file, value) {
+  let cur = { replace: false, values: [] }; try { cur = JSON.parse(await fsp.readFile(file, 'utf8')); } catch {}
+  if (!cur.values.includes(value)) cur.values.push(value);
+  await fsp.mkdir(path.dirname(file), { recursive: true });
+  await fsp.writeFile(file, JSON.stringify(cur, null, 2) + '\n');
+}
+const jstr = s => JSON.stringify(String(s));
+const fnum = n => `${Number(n) || 0}f`;
+ipcMain.handle('adv:addElement', async (_e, { project, el }) => {
+  const meta = await advMeta(project);
+  const dir = advDir(project), modid = meta.modid, pkgPath = path.join(dir, 'src/main/java', ...meta.pkg.split('.'));
+  const id = javaId(el.name);
+  if (meta.elements.some(x => x.id === id)) throw new Error(`You already have something called ${id}.`);
+  const C = CONST(id), res = path.join(dir, 'src/main/resources'), assets = path.join(res, 'assets', modid), data = path.join(res, 'data', modid);
+  const items = path.join(pkgPath, 'ModItems.java'), blocks = path.join(pkgPath, 'ModBlocks.java');
+  const tex = String(el.texture || '').startsWith('data:image/png;base64,') ? Buffer.from(el.texture.split(',')[1], 'base64') : null;
+  const s = el.stats || {};
+  const written = [];
+  const put = async (rel, content) => { const f = path.join(dir, rel); await fsp.mkdir(path.dirname(f), { recursive: true }); await fsp.writeFile(f, content); written.push(rel); };
+  const relRes = p => path.relative(dir, p).split(path.sep).join('/');
+  if (el.kind === 'block') {
+    await insertBefore(blocks, '// @p1xel:blocks', `public static final Block ${C} = register(${jstr(id)}, new Block(AbstractBlock.Settings.create()\n        .strength(${fnum(s.hardness ?? 5)}, ${fnum(s.resistance ?? 6)})${s.needsTool !== false ? '.requiresTool()' : ''}.luminance(state -> ${Math.max(0, Math.min(15, Math.round(Number(s.light) || 0)))})\n        .sounds(BlockSoundGroup.${['METAL', 'STONE', 'WOOD', 'GLASS', 'AMETHYST_BLOCK', 'SCULK'].includes(s.sound) ? s.sound : 'STONE'})));`);
+    await put(`src/main/resources/assets/${modid}/blockstates/${id}.json`, JSON.stringify({ variants: { '': { model: `${modid}:block/${id}` } } }, null, 2) + '\n');
+    await put(`src/main/resources/assets/${modid}/models/block/${id}.json`, JSON.stringify({ parent: 'minecraft:block/cube_all', textures: { all: `${modid}:block/${id}` } }, null, 2) + '\n');
+    await put(`src/main/resources/assets/${modid}/models/item/${id}.json`, JSON.stringify({ parent: `${modid}:block/${id}` }, null, 2) + '\n');
+    if (tex) await put(`src/main/resources/assets/${modid}/textures/block/${id}.png`, tex);
+    await put(`src/main/resources/data/${modid}/loot_table/blocks/${id}.json`, JSON.stringify({ type: 'minecraft:block', pools: [{ rolls: 1, entries: [{ type: 'minecraft:item', name: `${modid}:${id}` }], conditions: [{ condition: 'minecraft:survives_explosion' }] }] }, null, 2) + '\n');
+    await addTag(path.join(res, 'data/minecraft/tags/block/mineable/pickaxe.json'), `${modid}:${id}`);
+    if (s.needsTool !== false) await addTag(path.join(res, `data/minecraft/tags/block/needs_${['stone', 'iron', 'diamond'].includes(s.tier) ? s.tier : 'iron'}_tool.json`), `${modid}:${id}`);
+    await mergeJson(path.join(assets, 'lang/en_us.json'), { [`block.${modid}.${id}`]: el.name });
+  } else {
+    let make;
+    if (el.kind === 'food') {
+      const eff = (el.effects || []).filter(x => /^[a-z_]+$/.test(x.id)).map(x => `.statusEffect(new StatusEffectInstance(StatusEffects.${x.id.toUpperCase()}, ${Math.round((Number(x.seconds) || 10) * 20)}, ${Math.max(0, (Number(x.level) || 1) - 1)}), 1.0f)`).join('');
+      make = `new Item(new Item.Settings().food(new FoodComponent.Builder().nutrition(${Math.round(Number(s.nutrition) || 6)}).saturationModifier(${fnum(s.saturation ?? 0.6)})${s.alwaysEat ? '.alwaysEdible()' : ''}${eff}.build()))`;
+    } else if (el.kind === 'sword' || el.kind === 'pickaxe') {
+      const mat = `${C}_MATERIAL`;
+      await insertBefore(items, '// @p1xel:items', `public static final ModToolMaterial ${mat} = new ModToolMaterial(${Math.round(Number(s.durability) || 2500)}, ${fnum(s.speed ?? 10)}, ${fnum(s.damage ?? 5)}, ${Math.round(Number(s.enchantability) || 15)}, BlockTags.INCORRECT_FOR_NETHERITE_TOOL, () -> Ingredient.ofItems(Items.NETHERITE_INGOT));`);
+      make = el.kind === 'sword'
+        ? `new SwordItem(${mat}, new Item.Settings().fireproof().attributeModifiers(SwordItem.createAttributeModifiers(${mat}, 3, -2.4f)))`
+        : `new PickaxeItem(${mat}, new Item.Settings().fireproof().attributeModifiers(MiningToolItem.createAttributeModifiers(${mat}, 1.0f, -2.8f)))`;
+    } else {
+      make = `new Item(new Item.Settings()${el.fireproof ? '.fireproof()' : ''}${el.stack && el.stack !== 64 ? `.maxCount(${Math.max(1, Math.min(99, Math.round(el.stack)))})` : ''})`;
+    }
+    await insertBefore(items, '// @p1xel:items', `public static final Item ${C} = register(${jstr(id)}, ${make});`);
+    await put(`src/main/resources/assets/${modid}/models/item/${id}.json`, JSON.stringify({ parent: el.kind === 'sword' || el.kind === 'pickaxe' ? 'minecraft:item/handheld' : 'minecraft:item/generated', textures: { layer0: `${modid}:item/${id}` } }, null, 2) + '\n');
+    if (tex) await put(`src/main/resources/assets/${modid}/textures/item/${id}.png`, tex);
+    await mergeJson(path.join(assets, 'lang/en_us.json'), { [`item.${modid}.${id}`]: el.name });
+  }
+  // a starter recipe you can edit
+  const recipe = el.recipe && el.recipe.length === 9 ? el.recipe : null;
+  if (recipe && recipe.some(Boolean)) {
+    const keyOf = {}, L = 'ABCDEFGHI';
+    let rows = [0, 1, 2].map(r => recipe.slice(r * 3, r * 3 + 3).map(x => String(x || '').trim()));
+    rows = rows.filter(r => r.some(Boolean));
+    const cols = [0, 1, 2].filter(c => rows.some(r => r[c]));
+    rows = rows.map(r => cols.map(c => r[c]));
+    const pattern = rows.map(r => r.map(x => x ? (keyOf[x] ||= L[Object.keys(keyOf).length]) : ' ').join(''));
+    const key = {}; for (const [item, k] of Object.entries(keyOf)) key[k] = { item: item.startsWith('@') ? `${modid}:${javaId(item.slice(1))}` : (item.includes(':') ? item : 'minecraft:' + item) };
+    await put(`src/main/resources/data/${modid}/recipe/${id}.json`, JSON.stringify({ type: 'minecraft:crafting_shaped', category: 'misc', pattern, key, result: { id: `${modid}:${id}`, count: Math.max(1, Math.min(64, Number(el.count) || 1)) } }, null, 2) + '\n');
+  }
+  meta.elements.push({ id, kind: el.kind, name: el.name }); meta.updated = Date.now();
+  await fsp.writeFile(path.join(dir, 'p1xel-project.json'), JSON.stringify(meta, null, 2));
+  return { meta, written, id };
+});
+
+// ----- building: Java 21 (JDK) + Gradle, downloaded once -----
+const GRADLE_VER = '8.12';
+async function ensureJdk() {
+  const dir = path.join(JAVA_ROOT(), 'jdk21');
+  const find = () => { const b = fs.existsSync(dir) && findJavaBin(dir); return b ? path.dirname(path.dirname(b.replace(/javaw\.exe$/i, 'java.exe'))) : null; };
+  let home = find(); if (home) return home;
+  const os_ = { win32: 'windows', darwin: 'mac', linux: 'linux' }[process.platform];
+  const arch = { x64: 'x64', arm64: 'aarch64' }[process.arch] || 'x64';
+  const ext = os_ === 'windows' ? 'zip' : 'tar.gz';
+  const archive = path.join(JAVA_ROOT(), `jdk21.${ext}`);
+  advSend('adv:log', { text: '⬇ Downloading Java 21 (JDK), about 200 MB. Only the first time…\n' });
+  await download(`https://api.adoptium.net/v3/binary/latest/21/ga/${os_}/${arch}/jdk/hotspot/normal/eclipse`, archive, f => advSend('adv:progress', { stage: 'Downloading Java 21', pct: f }));
+  await fsp.mkdir(dir, { recursive: true });
+  if (ext === 'zip') new AdmZip(archive).extractAllTo(dir, true); else await tar.x({ file: archive, cwd: dir });
+  await fsp.rm(archive, { force: true });
+  home = find(); if (!home) throw new Error('Java downloaded, but no java program was found inside.');
+  if (process.platform !== 'win32') for (const b of await fsp.readdir(path.join(home, 'bin'))) await fsp.chmod(path.join(home, 'bin', b), 0o755);
+  return home;
+}
+async function ensureGradle() {
+  const root = path.join(DATA(), 'tools', `gradle-${GRADLE_VER}`);
+  const bin = path.join(root, 'bin', process.platform === 'win32' ? 'gradle.bat' : 'gradle');
+  if (fs.existsSync(bin)) return bin;
+  const zip = path.join(DATA(), 'tools', `gradle-${GRADLE_VER}.zip`);
+  advSend('adv:log', { text: `⬇ Downloading Gradle ${GRADLE_VER} (the mod builder), about 130 MB. Only the first time…\n` });
+  await download(`https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip`, zip, f => advSend('adv:progress', { stage: 'Downloading Gradle', pct: f }));
+  new AdmZip(zip).extractAllTo(path.join(DATA(), 'tools'), true);
+  await fsp.rm(zip, { force: true });
+  if (process.platform !== 'win32') await fsp.chmod(bin, 0o755);
+  return bin;
+}
+let advBuild = null;
+ipcMain.handle('adv:build', async (_e, project) => {
+  if (advBuild) throw new Error('A build is already running.');
+  const dir = advDir(project);
+  try {
+    advSend('adv:progress', { stage: 'Getting Java 21…' });
+    const javaHome = await ensureJdk();
+    advSend('adv:progress', { stage: 'Getting Gradle…' });
+    const gradle = await ensureGradle();
+    advSend('adv:progress', { stage: 'Building your mod (the first build takes a few minutes)…' });
+    advSend('adv:log', { text: `\n▶ gradle build\n` });
+    const code = await new Promise((res, rej) => {
+      const p = require('child_process').spawn(gradle, ['build', '--no-daemon', '--console=plain'], {
+        cwd: dir, shell: process.platform === 'win32', windowsHide: true,
+        env: { ...process.env, JAVA_HOME: javaHome, PATH: path.join(javaHome, 'bin') + path.delimiter + process.env.PATH, GRADLE_USER_HOME: path.join(DATA(), 'tools', 'gradle-home') },
+      });
+      advBuild = p;
+      p.stdout.on('data', d => advSend('adv:log', { text: d.toString() }));
+      p.stderr.on('data', d => advSend('adv:log', { text: d.toString(), err: true }));
+      p.on('close', res); p.on('error', rej);
+    });
+    if (code !== 0) throw new Error('The build failed. Look at the red lines in the console to see why.');
+    const libs = path.join(dir, 'build', 'libs');
+    const jar = (await fsp.readdir(libs)).find(f => f.endsWith('.jar') && !/-(sources|dev)\.jar$/.test(f));
+    if (!jar) throw new Error('Build finished, but no mod .jar was made.');
+    advSend('adv:progress', null);
+    return { jar: path.join(libs, jar), name: jar };
+  } finally { advBuild = null; advSend('adv:progress', null); }
+});
+ipcMain.handle('adv:stop', () => { advBuild?.kill(); return true; });
+ipcMain.handle('adv:install', async (_e, { project, instanceId }) => {
+  const libs = path.join(advDir(project), 'build', 'libs');
+  const jar = fs.existsSync(libs) && (await fsp.readdir(libs)).find(f => f.endsWith('.jar') && !/-(sources|dev)\.jar$/.test(f));
+  if (!jar) throw new Error('Build the mod first (🔨 Build).');
+  const inst = await readInstance(instanceId);
+  if (inst.loader !== 'fabric' || inst.mcVersion !== ADV_MC) throw new Error(`Advanced mode mods need a Fabric ${ADV_MC} instance.`);
+  const meta = await advMeta(project);
+  inst.mods ||= [];
+  for (const m of inst.mods.filter(m => m.source === 'advanced' && m.projectId === meta.modid)) await fsp.rm(path.join(instDir(inst.id), 'mods', m.file), { force: true });
+  inst.mods = inst.mods.filter(m => !(m.source === 'advanced' && m.projectId === meta.modid));
+  await fsp.copyFile(path.join(libs, jar), path.join(instDir(inst.id), 'mods', jar));
+  inst.mods.push({ source: 'advanced', projectId: meta.modid, title: meta.name, icon: '', version: 'Advanced mode', file: jar, type: 'mod' });
+  let api = 'present';
+  if (!inst.mods.some(m => m.projectId === 'P7dR8mSH')) { try { await installModrinth(inst, 'P7dR8mSH'); api = 'added'; } catch (e) { api = e.message; } }
+  await writeInstance(inst);
+  return { instance: inst, api };
+});
+ipcMain.handle('adv:instances', async () => {
+  await fsp.mkdir(INST_ROOT(), { recursive: true });
+  const out = [];
+  for (const id of await fsp.readdir(INST_ROOT())) { try { const i = await readInstance(id); if (i.loader === 'fabric' && i.mcVersion === ADV_MC) out.push({ id: i.id, name: i.name }); } catch {} }
+  return out;
+});
+
+// ----- plugins: extra element types from the P1xel Lab website (templates only, nothing runs in the launcher) -----
+const PLUGIN_DIR = () => path.join(DATA(), 'advanced-plugins');
+const SITE = 'https://vividp1xels.github.io/p1xel-lab';
+function checkPlugin(pl) {
+  if (!pl || !/^[a-z0-9_-]{2,40}$/.test(pl.id) || !Array.isArray(pl.elements)) throw new Error("That isn't a P1xel Lab plugin.");
+  for (const el of pl.elements) {
+    if (!/^[a-z0-9_]{2,30}$/.test(el.key)) throw new Error('Plugin element is missing a key.');
+    for (const rel of Object.keys(el.files || {})) if (rel.includes('..') || rel.startsWith('/')) throw new Error('Plugin tries to write outside the project.');
+    for (const ins of el.inserts || []) if (!['ModItems.java', 'ModBlocks.java', 'ModMain.java'].includes(ins.file)) throw new Error('Plugin can only add code to ModItems, ModBlocks or ModMain.');
+  }
+  return pl;
+}
+ipcMain.handle('adv:plugins', async () => {
+  await fsp.mkdir(PLUGIN_DIR(), { recursive: true });
+  const out = [];
+  for (const f of await fsp.readdir(PLUGIN_DIR())) if (f.endsWith('.json')) { try { out.push(checkPlugin(JSON.parse(await fsp.readFile(path.join(PLUGIN_DIR(), f), 'utf8')))); } catch {} }
+  return out;
+});
+ipcMain.handle('adv:pluginGallery', async () => getJSON(`${SITE}/plugins/index.json`));
+ipcMain.handle('adv:installPlugin', async (_e, { url, fromFile }) => {
+  let pl;
+  if (fromFile) {
+    const r = await dialog.showOpenDialog(advWin || win, { title: 'Install a plugin', properties: ['openFile'], filters: [{ name: 'P1xel Lab plugin', extensions: ['json'] }] });
+    if (r.canceled) return null;
+    pl = JSON.parse(await fsp.readFile(r.filePaths[0], 'utf8'));
+  } else {
+    if (!String(url).startsWith(SITE + '/')) throw new Error('Plugins can only be installed from the P1xel Lab website or a file.');
+    pl = await getJSON(url);
+  }
+  checkPlugin(pl);
+  await fsp.mkdir(PLUGIN_DIR(), { recursive: true });
+  await fsp.writeFile(path.join(PLUGIN_DIR(), `${pl.id}.json`), JSON.stringify(pl, null, 2));
+  return pl;
+});
+ipcMain.handle('adv:removePlugin', (_e, id) => fsp.rm(path.join(PLUGIN_DIR(), `${path.basename(id)}.json`), { force: true }));
+// {{id}} {{ID}} {{modid}} {{name}} and {{field}} placeholders; values are cleaned so they can't break the code
+function fillTemplate(text, vals) {
+  return String(text).replace(/\{\{(\w+)\}\}/g, (m, k) => (k in vals ? String(vals[k]) : m));
+}
+ipcMain.handle('adv:addPluginElement', async (_e, { project, pluginId, key, values }) => {
+  const pl = checkPlugin(JSON.parse(await fsp.readFile(path.join(PLUGIN_DIR(), `${path.basename(pluginId)}.json`), 'utf8')));
+  const tpl = pl.elements.find(x => x.key === key); if (!tpl) throw new Error('Unknown plugin element.');
+  const meta = await advMeta(project);
+  const dir = advDir(project), pkgPath = path.join(dir, 'src/main/java', ...meta.pkg.split('.'));
+  const id = javaId(values.name || key);
+  if (meta.elements.some(x => x.id === id)) throw new Error(`You already have something called ${id}.`);
+  const vals = { id, ID: CONST(id), modid: meta.modid, pkg: meta.pkg, name: String(values.name || id).replace(/["\\\n\r]/g, '') };
+  for (const f of tpl.fields || []) {
+    const v = values[f.id] ?? f.default;
+    vals[f.id] = f.type === 'number' ? String(Math.max(f.min ?? -1e9, Math.min(f.max ?? 1e9, Number(v) || 0))) : f.type === 'bool' ? String(!!v) : String(v ?? '').replace(/["\\\n\r{}]/g, '').slice(0, 80);
+  }
+  const written = [];
+  for (const [rel, content] of Object.entries(tpl.files || {})) {
+    const out = advFile(project, fillTemplate(rel, vals));
+    await fsp.mkdir(path.dirname(out), { recursive: true });
+    await fsp.writeFile(out, typeof content === 'string' ? fillTemplate(content, vals) : fillTemplate(JSON.stringify(content, null, 2), vals) + '\n');
+    written.push(path.relative(dir, out).split(path.sep).join('/'));
+  }
+  for (const ins of tpl.inserts || []) {
+    const marker = ins.marker || { 'ModItems.java': '// @p1xel:items', 'ModBlocks.java': '// @p1xel:blocks', 'ModMain.java': '// @p1xel:init' }[ins.file];
+    const file = path.join(pkgPath, ins.file);
+    const code = fillTemplate(ins.code, vals);
+    if (ins.once && (await fsp.readFile(file, 'utf8')).includes(code)) continue;
+    await insertBefore(file, marker, code);
+  }
+  for (const t of tpl.tags || []) { const f = fillTemplate(t.file, vals); if (!f.includes('..')) await addTag(advFile(project, f), fillTemplate(t.value, vals)); }
+  for (const [k, v] of Object.entries(tpl.lang || {})) await mergeJson(path.join(dir, 'src/main/resources/assets', meta.modid, 'lang/en_us.json'), { [fillTemplate(k, vals)]: fillTemplate(v, vals) });
+  if (values.texture && tpl.texture) { const out = advFile(project, fillTemplate(tpl.texture, vals)); await fsp.mkdir(path.dirname(out), { recursive: true }); await fsp.writeFile(out, Buffer.from(String(values.texture).split(',')[1], 'base64')); written.push(path.relative(dir, out).split(path.sep).join('/')); }
+  meta.elements.push({ id, kind: `${pl.id}:${key}`, name: vals.name, plugin: pl.name }); meta.updated = Date.now();
+  await fsp.writeFile(path.join(dir, 'p1xel-project.json'), JSON.stringify(meta, null, 2));
+  return { meta, written, id };
+});

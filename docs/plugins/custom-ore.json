@@ -1,0 +1,41 @@
+{
+  "id": "custom-ore",
+  "name": "Custom Ore",
+  "version": "1.0.0",
+  "author": "VividP1xels",
+  "description": "Ores that spawn underground in your worlds",
+  "elements": [
+    {
+      "key": "ore",
+      "label": "Ore",
+      "icon": "⛏",
+      "description": "A new ore block that generates in the Overworld, in stone and deepslate.",
+      "textureKind": "block",
+      "texture": "src/main/resources/assets/{{modid}}/textures/block/{{id}}.png",
+      "fields": [
+        { "id": "veinSize", "label": "Ores per vein", "type": "number", "default": 6, "min": 1, "max": 20 },
+        { "id": "veins", "label": "Veins per chunk", "type": "number", "default": 8, "min": 1, "max": 50 },
+        { "id": "minY", "label": "Lowest Y", "type": "number", "default": -64, "min": -64, "max": 320 },
+        { "id": "maxY", "label": "Highest Y", "type": "number", "default": 32, "min": -64, "max": 320 },
+        { "id": "hardness", "label": "Hardness", "type": "number", "default": 3, "min": 0, "max": 50 }
+      ],
+      "inserts": [
+        { "file": "ModBlocks.java", "code": "public static final Block {{ID}} = register(\"{{id}}\", new Block(AbstractBlock.Settings.create().strength({{hardness}}f, 3.0f).requiresTool().sounds(BlockSoundGroup.STONE)));" },
+        { "file": "ModMain.java", "code": "net.fabricmc.fabric.api.biome.v1.BiomeModifications.addFeature(net.fabricmc.fabric.api.biome.v1.BiomeSelectors.foundInOverworld(), net.minecraft.world.gen.GenerationStep.Feature.UNDERGROUND_ORES, net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.PLACED_FEATURE, Identifier.of(MOD_ID, \"{{id}}\")));" }
+      ],
+      "files": {
+        "src/main/resources/assets/{{modid}}/blockstates/{{id}}.json": { "variants": { "": { "model": "{{modid}}:block/{{id}}" } } },
+        "src/main/resources/assets/{{modid}}/models/block/{{id}}.json": { "parent": "minecraft:block/cube_all", "textures": { "all": "{{modid}}:block/{{id}}" } },
+        "src/main/resources/assets/{{modid}}/models/item/{{id}}.json": { "parent": "{{modid}}:block/{{id}}" },
+        "src/main/resources/data/{{modid}}/loot_table/blocks/{{id}}.json": { "type": "minecraft:block", "pools": [{ "rolls": 1, "entries": [{ "type": "minecraft:item", "name": "{{modid}}:{{id}}" }], "conditions": [{ "condition": "minecraft:survives_explosion" }] }] },
+        "src/main/resources/data/{{modid}}/worldgen/configured_feature/{{id}}.json": "{\n  \"type\": \"minecraft:ore\",\n  \"config\": {\n    \"size\": {{veinSize}},\n    \"discard_chance_on_air_exposure\": 0.0,\n    \"targets\": [\n      { \"target\": { \"predicate_type\": \"minecraft:tag_match\", \"tag\": \"minecraft:stone_ore_replaceables\" }, \"state\": { \"Name\": \"{{modid}}:{{id}}\" } },\n      { \"target\": { \"predicate_type\": \"minecraft:tag_match\", \"tag\": \"minecraft:deepslate_ore_replaceables\" }, \"state\": { \"Name\": \"{{modid}}:{{id}}\" } }\n    ]\n  }\n}\n",
+        "src/main/resources/data/{{modid}}/worldgen/placed_feature/{{id}}.json": "{\n  \"feature\": \"{{modid}}:{{id}}\",\n  \"placement\": [\n    { \"type\": \"minecraft:count\", \"count\": {{veins}} },\n    { \"type\": \"minecraft:in_square\" },\n    { \"type\": \"minecraft:height_range\", \"height\": { \"type\": \"minecraft:uniform\", \"min_inclusive\": { \"absolute\": {{minY}} }, \"max_inclusive\": { \"absolute\": {{maxY}} } } },\n    { \"type\": \"minecraft:biome\" }\n  ]\n}\n"
+      },
+      "tags": [
+        { "file": "src/main/resources/data/minecraft/tags/block/mineable/pickaxe.json", "value": "{{modid}}:{{id}}" },
+        { "file": "src/main/resources/data/minecraft/tags/block/needs_iron_tool.json", "value": "{{modid}}:{{id}}" }
+      ],
+      "lang": { "block.{{modid}}.{{id}}": "{{name}}" }
+    }
+  ]
+}

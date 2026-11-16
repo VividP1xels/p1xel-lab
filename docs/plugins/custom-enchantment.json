@@ -1,0 +1,30 @@
+{
+  "id": "custom-enchantment",
+  "name": "Custom Enchantment",
+  "version": "1.0.0",
+  "author": "VividP1xels",
+  "description": "Your own enchantments, from the enchanting table",
+  "elements": [
+    {
+      "key": "damage_enchantment",
+      "label": "Damage enchantment",
+      "icon": "✨",
+      "description": "A new weapon enchantment that adds damage, like a stronger Sharpness. It shows up in the enchanting table.",
+      "fields": [
+        { "id": "maxLevel", "label": "Max level", "type": "number", "default": 3, "min": 1, "max": 10 },
+        { "id": "damage", "label": "Damage at level 1", "type": "number", "default": 2, "min": 0, "max": 50 },
+        { "id": "perLevel", "label": "Extra damage per level", "type": "number", "default": 1, "min": 0, "max": 50 },
+        { "id": "items", "label": "Works on", "type": "select", "default": "#minecraft:enchantable/weapon", "options": ["#minecraft:enchantable/weapon", "#minecraft:enchantable/sword", "#minecraft:enchantable/bow", "#minecraft:enchantable/trident", "#minecraft:enchantable/mace"] },
+        { "id": "rarity", "label": "How common (1 rare – 10 common)", "type": "number", "default": 2, "min": 1, "max": 10 }
+      ],
+      "files": {
+        "src/main/resources/data/{{modid}}/enchantment/{{id}}.json": "{\n  \"description\": { \"translate\": \"enchantment.{{modid}}.{{id}}\" },\n  \"supported_items\": \"{{items}}\",\n  \"weight\": {{rarity}},\n  \"max_level\": {{maxLevel}},\n  \"min_cost\": { \"base\": 10, \"per_level_above_first\": 10 },\n  \"max_cost\": { \"base\": 60, \"per_level_above_first\": 10 },\n  \"anvil_cost\": 4,\n  \"slots\": [\"mainhand\"],\n  \"effects\": {\n    \"minecraft:damage\": [\n      { \"effect\": { \"type\": \"minecraft:add\", \"value\": { \"type\": \"minecraft:linear\", \"base\": {{damage}}, \"per_level_above_first\": {{perLevel}} } } }\n    ]\n  }\n}\n"
+      },
+      "tags": [
+        { "file": "src/main/resources/data/minecraft/tags/enchantment/in_enchanting_table.json", "value": "{{modid}}:{{id}}" },
+        { "file": "src/main/resources/data/minecraft/tags/enchantment/non_treasure.json", "value": "{{modid}}:{{id}}" }
+      ],
+      "lang": { "enchantment.{{modid}}.{{id}}": "{{name}}" }
+    }
+  ]
+}
