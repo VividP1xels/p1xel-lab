@@ -7,10 +7,10 @@
   function open() {
     $('#maker-view').innerHTML = `
       <div class="srv-head"><div><h2 class="pix">Create</h2></div></div>
-      <div class="type-chips create-nav">${[['mods', '🧩 Mods & Data Packs'], ['rp', '🎨 Resource Packs'], ['shader', '✨ Shaders']].map(([k, t]) => `<button data-sec="${k}" class="${C.section === k ? 'active' : ''}">${t}</button>`).join('')}</div>
+      <div class="type-chips create-nav">${[['mods', '🧩 Mods & Data Packs'], ['rp', '🎨 Resource Packs'], ['shader', '✨ Shaders'], ['skin', '🧑 Skins'], ['modpack', '📦 Modpacks']].map(([k, t]) => `<button data-sec="${k}" class="${C.section === k ? 'active' : ''}">${t}</button>`).join('')}</div>
       <div id="create-body"></div>`;
     $('.create-nav').onclick = e => { const b = e.target.closest('[data-sec]'); if (b) { C.section = b.dataset.sec; open(); } };
-    if (C.section === 'mods') Maker.open(); else if (C.section === 'rp') RP.open(); else SH.open();
+    ({ mods: () => Maker.open(), rp: () => RP.open(), shader: () => SH.open(), skin: () => SK.open(), modpack: () => MP.open() })[C.section]();
   }
 
   // shared: pick an instance to add to
@@ -116,7 +116,7 @@
       <div class="mm-item-top"><b>${esc(RP.sel)}</b><span class="fine">${w}×${h}${RP.img.animated ? ' · first frame of an animation' : ''}</span></div>
       <canvas id="rp-cv" width="${w * scale}" height="${h * scale}"></canvas>
       <div class="tools">${[['pen', '✏️ Pencil'], ['erase', '🧽 Eraser'], ['fill', '🪣 Fill'], ['pick', '💧 Pick color']].map(([k, t]) => `<button class="chip ${RP.tool === k ? 'on' : ''}" data-tool="${k}">${t}</button>`).join('')}
-        <input type="color" id="rp-color" value="${RP.color}"><button class="chip" id="rp-undo">↶ Undo</button><button class="chip" id="rp-reset">Reset</button></div>
+        ${ColorPicker.swatch('rp-color', RP.color)}<button class="chip" id="rp-undo">↶ Undo</button><button class="chip" id="rp-reset">Reset</button></div>
       <div class="palette">${['#000000', '#ffffff', '#ff3fd2', '#8b2cff', '#14e0ff', '#2bd96b', '#ffe14d', '#ff8a1f', '#e8323c', '#7a4a24', '#3c3c3c', '#9a9a9a'].map(c => `<button data-c="${c}" style="background:${c}"></button>`).join('')}</div>
       <div class="dlg-row end"><button class="btn btn-primary" id="rp-save">Save texture to pack</button></div>`;
     const cv = $('#rp-cv'), g = cv.getContext('2d');
@@ -135,7 +135,7 @@
       const r = cv.getBoundingClientRect();
       const x = Math.floor((e.clientX - r.left) / r.width * w), y = Math.floor((e.clientY - r.top) / r.height * h);
       if (x < 0 || y < 0 || x >= w || y >= h) return;
-      if (RP.tool === 'pick') { const i = at(x, y); RP.color = '#' + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, '0')).join(''); $('#rp-color').value = RP.color; RP.tool = 'pen'; RP.editor(); return; }
+      if (RP.tool === 'pick') { const i = at(x, y); RP.color = '#' + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, '0')).join(''); RP.tool = 'pen'; RP.editor(); return; }
       if (first) snapshot();
       if (RP.tool === 'fill' && first) {
         const i0 = at(x, y), target = [d[i0], d[i0 + 1], d[i0 + 2], d[i0 + 3]], col = [...hex(RP.color), 255];
@@ -155,8 +155,8 @@
     cv.onpointermove = e => { if (down && RP.tool !== 'fill') act(e, false); };
     cv.onpointerup = () => { down = false; };
     ed.querySelector('.tools').onclick = e => { const t = e.target.closest('[data-tool]'); if (t) { RP.tool = t.dataset.tool; RP.editor(); } };
-    $('#rp-color').oninput = e => { RP.color = e.target.value; };
-    ed.querySelector('.palette').onclick = e => { const b = e.target.closest('[data-c]'); if (b) { RP.color = b.dataset.c; $('#rp-color').value = RP.color; if (RP.tool !== 'fill') RP.tool = 'pen'; } };
+    ColorPicker.bind($('#rp-color'), () => RP.color, h => { RP.color = h; if (RP.tool !== 'fill') RP.tool = 'pen'; });
+    ed.querySelector('.palette').onclick = e => { const b = e.target.closest('[data-c]'); if (b) { RP.color = b.dataset.c; $('#rp-color').style.setProperty('--c', RP.color); if (RP.tool !== 'fill') RP.tool = 'pen'; } };
     $('#rp-undo').onclick = () => { const prev = RP.history.pop(); if (prev) { d.set(prev); draw(); } };
     $('#rp-reset').onclick = async () => { delete RP.cur.textures[RP.sel]; saveRP(); RP.pick(RP.sel); };
     $('#rp-save').onclick = () => {
@@ -207,7 +207,8 @@
           <b class="lbl">Start from a look</b>
           <div class="chips">${Object.keys(PRESETS).map(k => `<button class="chip" data-preset="${k}">${k}</button>`).join('')}</div>
           <div class="sliders">${SLIDERS.map(([k, t, lo, hi]) => `<label class="slider"><span>${t}</span><input type="range" min="${lo}" max="${hi}" step="${hi > 4 ? 1 : 0.01}" data-s="${k}" value="${st[k]}"><b>${(+st[k]).toFixed(hi > 4 ? 0 : 2)}</b></label>`).join('')}</div>
-          <label class="slider"><span>Fog color</span><input type="color" id="sh-fog" value="${'#' + [st.fogR, st.fogG, st.fogB].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('')}"></label>
+          <label class="slider"><span>Fog color</span>${ColorPicker.swatch('sh-fog', '#' + [st.fogR, st.fogG, st.fogB].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join(''))}</label>
+          <label class="slider"><span>Tint color</span>${ColorPicker.swatch('sh-tint', '#' + [st.tintR, st.tintG, st.tintB].map(v => Math.round(Math.min(1.6, v) / 1.6 * 255).toString(16).padStart(2, '0')).join(''))}</label>
         </div>
         <div class="srv-card">
           <b class="lbl">Preview</b>
@@ -224,7 +225,11 @@
       const k = e.target.dataset.s; if (!k) return;
       st[k] = +e.target.value; e.target.nextElementSibling.textContent = (+e.target.value).toFixed(+e.target.max > 4 ? 0 : 2); saveSH(); SH.preview();
     };
-    $('#sh-fog').oninput = e => { const [r, g, b] = [1, 3, 5].map(i => parseInt(e.target.value.substr(i, 2), 16) / 255); Object.assign(st, { fogR: r, fogG: g, fogB: b }); saveSH(); SH.preview(); };
+    ColorPicker.bind($('#sh-fog'), () => '#' + [st.fogR, st.fogG, st.fogB].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join(''), h => { const [r, g, b] = ColorPicker.hex2rgb(h).map(v => v / 255); Object.assign(st, { fogR: r, fogG: g, fogB: b }); saveSH(); SH.preview(); });
+    ColorPicker.bind($('#sh-tint'), () => '#' + [st.tintR, st.tintG, st.tintB].map(v => Math.round(Math.min(1.6, v) / 1.6 * 255).toString(16).padStart(2, '0')).join(''), h => {
+      const [r, g, b] = ColorPicker.hex2rgb(h).map(v => +(v / 255 * 1.6).toFixed(2)); Object.assign(st, { tintR: r, tintG: g, tintB: b });
+      ['tintR', 'tintG', 'tintB'].forEach(k => { const el = $(`[data-s=${k}]`); if (el) { el.value = st[k]; el.nextElementSibling.textContent = st[k].toFixed(2); } }); saveSH(); SH.preview();
+    });
     $('#sh-body').onclick = async e => {
       const pz = e.target.closest('[data-preset]');
       if (pz) { sh.settings = { ...DEF, ...PRESETS[pz.dataset.preset] }; if (/^My Shader/.test(sh.name)) sh.name = pz.dataset.preset.replace(/^\S+\s/, '') + ' Shader'; saveSH(); SH.render(); }
@@ -287,5 +292,195 @@
     g.putImageData(out, 0, 0);
   };
 
-  window.Create = { open };
+  // ======================= Skin changer =======================
+  const SK = { lib: [], cur: null, account: null, tool: 'pen', color: '#3c8527', history: [], layer: 'all' };
+  // Parts of a 64×64 skin (x, y, w, h) — used for the starter skin and the "outer layer" filter
+  const OUTER = [[32, 0, 32, 16], [16, 32, 24, 16], [40, 32, 16, 16], [0, 32, 16, 16], [48, 48, 16, 16], [0, 48, 16, 16]];
+  const isOuter = (x, y) => OUTER.some(([a, b, w, h]) => x >= a && x < a + w && y >= b && y < b + h);
+  function starterSkin() {
+    const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+    const box = (col, ...r) => { g.fillStyle = col; g.fillRect(...r); };
+    box('#c9926b', 0, 0, 32, 16); box('#c9926b', 40, 16, 16, 16); box('#c9926b', 32, 48, 16, 16);
+    box('#5a3a22', 8, 0, 8, 8); box('#5a3a22', 0, 8, 32, 2); box('#5a3a22', 24, 8, 8, 8);
+    box('#8b2cff', 16, 16, 24, 16); box('#8b2cff', 40, 16, 16, 4); box('#8b2cff', 32, 48, 16, 4);
+    box('#2a2a55', 0, 16, 16, 16); box('#2a2a55', 16, 48, 16, 16);
+    box('#ffffff', 9, 12, 1, 1); box('#14e0ff', 10, 12, 1, 1); box('#14e0ff', 13, 12, 1, 1); box('#ffffff', 14, 12, 1, 1); box('#7a4a3a', 11, 14, 2, 1);
+    return c.toDataURL('image/png');
+  }
+  const saveSK = () => { clearTimeout(SK.t); SK.t = setTimeout(() => lab.skins.save(SK.cur).catch(() => {}), 400); };
+  SK.open = async () => {
+    SK.lib = await lab.skins.library();
+    if (!SK.cur) SK.cur = SK.lib[0] || null;
+    SK.render();
+    if (!SK.account && navigator.onLine) lab.skins.profile().then(a => { SK.account = a; SK.renderAccount(); }).catch(e => { SK.account = { error: errMsg(e) }; SK.renderAccount(); });
+  };
+  SK.render = () => {
+    const body = $('#create-body');
+    body.innerHTML = `
+      <p class="muted">Draw your own skin, import one, keep a library, and put it on your real Minecraft account. It shows everywhere you play.</p>
+      <div class="srv-card" id="sk-account"><p class="fine">Loading your Minecraft account…</p></div>
+      <div class="srv-tabs">${SK.lib.map(k => `<button class="srv-tab ${k.uid === SK.cur?.uid ? 'active' : ''}" data-sk="${k.uid}"><img src="${k.png}" class="sk-mini" alt="">${esc(k.name)}</button>`).join('')}
+        <button class="srv-tab" id="sk-new">+ New skin</button><button class="srv-tab" id="sk-import">📂 Import PNG</button></div>
+      <div id="sk-body"></div>`;
+    body.querySelector('.srv-tabs').onclick = async e => {
+      if (e.target.id === 'sk-new') return SK.add({ name: `My Skin ${SK.lib.length + 1}`, png: starterSkin(), variant: 'classic' });
+      if (e.target.id === 'sk-import') { try { const r = await lab.skins.importFile(); if (r) SK.add({ name: r.name, png: r.png, variant: 'classic' }); } catch (err) { toast(errMsg(err), 'err'); } return; }
+      const b = e.target.closest('[data-sk]'); if (b) { SK.cur = SK.lib.find(k => k.uid === b.dataset.sk); SK.img = null; SK.render(); }
+    };
+    SK.renderAccount();
+    if (!SK.cur) { $('#sk-body').innerHTML = `<div class="srv-card mm-empty"><h3 class="pix">Make a skin</h3><p class="muted">Start from a blank skin, import a PNG, or load the skin you're wearing now (above).</p><button class="btn btn-primary" id="sk-first">Start a skin</button></div>`; $('#sk-first').onclick = () => $('#sk-new').click(); return; }
+    SK.editor();
+  };
+  SK.add = async item => {
+    item = await lab.skins.save({ uid: hexUid(), ...item });
+    SK.lib.unshift(item); SK.cur = item; SK.img = null; SK.render();
+  };
+  const hexUid = () => [...crypto.getRandomValues(new Uint8Array(6))].map(b => b.toString(16).padStart(2, '0')).join('');
+  SK.renderAccount = () => {
+    const box = $('#sk-account'); if (!box) return;
+    const a = SK.account;
+    if (!a) return;
+    if (a.error) { box.innerHTML = `<p class="fine">Couldn't load your account skin: ${esc(a.error)}</p>`; return; }
+    box.innerHTML = `<div class="sk-acc">${a.skin ? `<canvas id="sk-acc-prev" width="40" height="32"></canvas>` : ''}
+      <div><b>Wearing now</b> <span class="muted">(${a.variant === 'slim' ? 'slim arms' : 'classic arms'})</span>
+      <div class="row"><button class="btn btn-ghost" id="sk-load" ${a.skin ? '' : 'disabled'}>Copy into my library</button><button class="btn btn-ghost" id="sk-reset">Reset to default</button></div></div>
+      <div class="capes"><b>Cape</b><div class="chips">${a.capes.length ? `<button class="chip ${a.capes.some(c => c.active) ? '' : 'on'}" data-cape="">None</button>` + a.capes.map(c => `<button class="chip ${c.active ? 'on' : ''}" data-cape="${esc(c.id)}">${esc(c.alias)}</button>`).join('') : '<span class="fine">You don\'t own any capes yet (they come from events, Minecon and Minecraft Live).</span>'}</div></div></div>`;
+    if (a.skin) skinImage(a.skin).then(img => drawPreview($('#sk-acc-prev'), img, a.variant));
+    $('#sk-load').onclick = () => SK.add({ name: `${state.user?.name || 'My'} skin`, png: a.skin, variant: a.variant });
+    $('#sk-reset').onclick = async () => { if (!confirm('Reset to the default skin on your Minecraft account?')) return; try { await lab.skins.reset(); toast('Skin reset.', 'ok'); SK.account = await lab.skins.profile(); SK.renderAccount(); } catch (e) { toast(errMsg(e), 'err'); } };
+    box.querySelector('.capes').onclick = async e => {
+      const c = e.target.closest('[data-cape]'); if (!c) return;
+      try { await lab.skins.cape(c.dataset.cape || null); toast(c.dataset.cape ? `Wearing ${c.textContent}!` : 'Cape hidden.', 'ok'); SK.account = await lab.skins.profile(); SK.renderAccount(); } catch (err) { toast(errMsg(err), 'err'); }
+    };
+  };
+  function skinImage(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+  // Front + back view of the player, drawn from the skin texture
+  function drawPreview(cv, img, variant) {
+    if (!cv) return;
+    const g = cv.getContext('2d'); g.imageSmoothingEnabled = false; g.clearRect(0, 0, cv.width, cv.height);
+    const a = variant === 'slim' ? 3 : 4;
+    const legacy = img.height === 32;
+    const P = (sx, sy, w, h, dx, dy, ox) => g.drawImage(img, sx, sy, w, h, dx + ox, dy, w, h);
+    const fig = (ox, back) => {
+      if (!back) {
+        P(8, 8, 8, 8, 4, 0, ox); P(20, 20, 8, 12, 4, 8, ox); P(44, 20, a, 12, 4 - a, 8, ox); P(4, 20, 4, 12, 4, 20, ox);
+        if (legacy) { P(44, 20, a, 12, 12, 8, ox); P(4, 20, 4, 12, 8, 20, ox); } else { P(36, 52, a, 12, 12, 8, ox); P(20, 52, 4, 12, 8, 20, ox); }
+        P(40, 8, 8, 8, 4, 0, ox);
+        if (!legacy) { P(20, 36, 8, 12, 4, 8, ox); P(44, 36, a, 12, 4 - a, 8, ox); P(52, 52, a, 12, 12, 8, ox); P(4, 36, 4, 12, 4, 20, ox); P(4, 52, 4, 12, 8, 20, ox); }
+      } else {
+        P(24, 8, 8, 8, 4, 0, ox); P(32, 20, 8, 12, 4, 8, ox); P(48 + a, 20, a, 12, 12, 8, ox); P(12, 20, 4, 12, 8, 20, ox);
+        if (legacy) { P(48 + a, 20, a, 12, 4 - a, 8, ox); P(12, 20, 4, 12, 4, 20, ox); } else { P(40 + a, 52, a, 12, 4 - a, 8, ox); P(28, 52, 4, 12, 4, 20, ox); }
+        P(56, 8, 8, 8, 4, 0, ox);
+        if (!legacy) { P(32, 36, 8, 12, 4, 8, ox); P(48 + a, 36, a, 12, 12, 8, ox); P(56 + a, 52, a, 12, 4 - a, 8, ox); P(12, 36, 4, 12, 8, 20, ox); P(12, 52, 4, 12, 4, 20, ox); }
+      }
+    };
+    fig(2, false); fig(22, true);
+  }
+  SK.editor = async () => {
+    const k = SK.cur;
+    $('#sk-body').innerHTML = `
+      <div class="rp-grid sk-grid">
+        <div class="srv-card">
+          <div class="row2"><label class="field"><span>Skin name</span><input id="sk-name" maxlength="30" value="${esc(k.name)}"></label>
+          <label class="field sm"><span>Arms</span><select id="sk-var"><option value="classic" ${k.variant !== 'slim' ? 'selected' : ''}>Classic (4px)</option><option value="slim" ${k.variant === 'slim' ? 'selected' : ''}>Slim (3px)</option></select></label></div>
+          <canvas id="sk-cv" width="448" height="448"></canvas>
+          <div class="tools">${[['pen', '✏️ Pencil'], ['erase', '🧽 Eraser'], ['fill', '🪣 Fill'], ['pick', '💧 Pick color']].map(([t, l]) => `<button class="chip ${SK.tool === t ? 'on' : ''}" data-tool="${t}">${l}</button>`).join('')}
+            ${ColorPicker.swatch('sk-color', SK.color)}<button class="chip" id="sk-undo">↶ Undo</button></div>
+          <label class="check"><input type="checkbox" id="sk-outer" ${SK.layer === 'outer' ? 'checked' : ''}> Only paint the outer layer (hat, jacket, sleeves)</label>
+        </div>
+        <div class="srv-card">
+          <b class="lbl">Preview (front and back)</b>
+          <canvas id="sk-prev" width="40" height="32"></canvas>
+          <div class="row" style="flex-wrap:wrap">
+            <button class="btn btn-play" id="sk-apply">⬆ Wear this skin</button>
+            <button class="btn btn-ghost" id="sk-export">💾 Save PNG</button>
+            <button class="btn btn-ghost danger" id="sk-del">Delete</button>
+          </div>
+          <p class="fine">"Wear this skin" puts it on your real Minecraft account, so everyone sees it in every game and server. It can take a minute to show up.</p>
+        </div>
+      </div>`;
+    const img = await skinImage(k.png);
+    // Convert old 64×32 skins to 64×64
+    const work = document.createElement('canvas'); work.width = work.height = 64;
+    const wg = work.getContext('2d'); wg.drawImage(img, 0, 0);
+    if (img.height === 32) { wg.drawImage(img, 0, 16, 16, 16, 16, 48, 16, 16); wg.drawImage(img, 40, 16, 16, 16, 32, 48, 16, 16); }
+    const data = wg.getImageData(0, 0, 64, 64), d = data.data;
+    const cv = $('#sk-cv'), g = cv.getContext('2d'), S = 7;
+    const prev = $('#sk-prev');
+    const commit = () => { wg.putImageData(data, 0, 0); k.png = work.toDataURL('image/png'); saveSK(); drawPreview(prev, work, k.variant); };
+    const draw = () => {
+      for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+        const i = (y * 64 + x) * 4;
+        g.fillStyle = (x + y) % 2 ? '#2a2540' : '#1e1a2e'; g.fillRect(x * S, y * S, S, S);
+        if (d[i + 3]) { g.fillStyle = `rgba(${d[i]},${d[i + 1]},${d[i + 2]},${d[i + 3] / 255})`; g.fillRect(x * S, y * S, S, S); }
+      }
+      g.strokeStyle = '#ffffff22'; g.lineWidth = 1;
+      for (const [x, y, w, h] of [[0, 0, 32, 16], [32, 0, 32, 16], [0, 16, 16, 16], [16, 16, 24, 16], [40, 16, 16, 16], [0, 32, 56, 16], [0, 48, 64, 16]]) g.strokeRect(x * S + 0.5, y * S + 0.5, w * S, h * S);
+    };
+    const at = (x, y) => (y * 64 + x) * 4;
+    const set = (x, y, rgba) => { if (SK.layer === 'outer' && !isOuter(x, y)) return; const i = at(x, y); for (let n = 0; n < 4; n++) d[i + n] = rgba[n]; };
+    const act = (e, first) => {
+      const r = cv.getBoundingClientRect();
+      const x = Math.floor((e.clientX - r.left) / r.width * 64), y = Math.floor((e.clientY - r.top) / r.height * 64);
+      if (x < 0 || y < 0 || x > 63 || y > 63) return;
+      if (SK.tool === 'pick') { const i = at(x, y); SK.color = ColorPicker.rgb2hex([d[i], d[i + 1], d[i + 2]]); SK.tool = 'pen'; SK.editor(); return; }
+      if (first) { SK.history.push(new Uint8ClampedArray(d)); if (SK.history.length > 40) SK.history.shift(); }
+      const col = [...ColorPicker.hex2rgb(SK.color), 255];
+      if (SK.tool === 'fill' && first) {
+        const i0 = at(x, y), t = [d[i0], d[i0 + 1], d[i0 + 2], d[i0 + 3]];
+        if (t.every((v, n) => v === col[n])) return;
+        const st = [[x, y]], seen = new Set();
+        while (st.length) { const [px, py] = st.pop(); const key = py * 64 + px; if (px < 0 || py < 0 || px > 63 || py > 63 || seen.has(key)) continue; seen.add(key); const i = at(px, py); if (!(d[i] === t[0] && d[i + 1] === t[1] && d[i + 2] === t[2] && d[i + 3] === t[3])) continue; set(px, py, col); st.push([px + 1, py], [px - 1, py], [px, py + 1], [px, py - 1]); }
+      } else if (SK.tool === 'pen') set(x, y, col);
+      else if (SK.tool === 'erase') set(x, y, [0, 0, 0, 0]);
+      draw();
+    };
+    let down = false;
+    cv.onpointerdown = e => { down = true; cv.setPointerCapture(e.pointerId); act(e, true); };
+    cv.onpointermove = e => { if (down && SK.tool !== 'fill') act(e, false); };
+    cv.onpointerup = () => { if (down) commit(); down = false; };
+    $('#sk-body .tools').onclick = e => { const t = e.target.closest('[data-tool]'); if (t) { SK.tool = t.dataset.tool; $$('#sk-body [data-tool]').forEach(b => b.classList.toggle('on', b === t)); } };
+    ColorPicker.bind($('#sk-color'), () => SK.color, h => { SK.color = h; if (SK.tool !== 'fill') { SK.tool = 'pen'; $$('#sk-body [data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === 'pen')); } });
+    $('#sk-outer').onchange = e => { SK.layer = e.target.checked ? 'outer' : 'all'; };
+    $('#sk-undo').onclick = () => { const p = SK.history.pop(); if (p) { d.set(p); draw(); commit(); } };
+    $('#sk-name').oninput = e => { k.name = e.target.value || 'Skin'; saveSK(); };
+    $('#sk-var').onchange = e => { k.variant = e.target.value; saveSK(); drawPreview(prev, work, k.variant); };
+    $('#sk-apply').onclick = async () => {
+      const b = $('#sk-apply'); b.disabled = true; b.textContent = 'Uploading…';
+      try { await lab.skins.upload({ png: k.png, variant: k.variant }); toast('🧑 You\'re wearing your new skin!', 'ok'); SK.account = null; lab.skins.profile().then(a => { SK.account = a; SK.renderAccount(); }).catch(() => {}); }
+      catch (e) { toast(errMsg(e), 'err'); }
+      b.disabled = false; b.textContent = '⬆ Wear this skin';
+    };
+    $('#sk-export').onclick = async () => { const f = await lab.skins.exportFile({ png: k.png, name: k.name }); if (f) toast('Saved!', 'ok'); };
+    $('#sk-del').onclick = async () => { if (!confirm(`Delete "${k.name}" from your library?`)) return; await lab.skins.remove(k.uid); SK.cur = null; SK.open(); };
+    draw(); drawPreview(prev, work, k.variant);
+  };
+  window.addEventListener('open-skin-file', async e => {
+    showView('maker'); C.section = 'skin'; open();
+    try { const png = 'data:image/png;base64,' + (await lab.files.read(e.detail)).base64; SK.add({ name: 'Skin from a friend', png, variant: 'classic' }); } catch (err) { toast(errMsg(err), 'err'); }
+  });
+
+  // ======================= Modpacks =======================
+  const MP = {};
+  MP.open = () => {
+    const insts = state.instances.filter(i => i.loader !== 'vanilla');
+    $('#create-body').innerHTML = `
+      <p class="muted">A modpack is an instance you set up: pick the mods, shaders, resource packs and settings you like, then share the whole thing.</p>
+      <div class="srv-card"><b class="lbl">How to make one</b>
+        <ol class="steps"><li>Make a new instance (or use one you have).</li><li>Add mods, shaders and packs from <b>Browse</b>, plus anything you made here in Create.</li><li>Play it and set up your options and controls.</li><li>Export it, publish it, or send it to a friend below.</li></ol>
+        <button class="btn btn-primary" id="mp-new">+ New modpack instance</button>
+      </div>
+      <div class="srv-card"><b class="lbl">Your instances</b>
+        ${insts.length ? insts.map(i => `<div class="ct-item"><span class="inst-icon">${Pixels.block(i.icon, 32)}</span><div><b>${esc(i.name)}</b><small>Minecraft ${esc(i.mcVersion)} · ${LOADER_NAME[i.loader]} · ${(i.mods || []).length} files</small></div>
+          <button class="btn btn-ghost sm" data-mpx="${esc(i.id)}">💾 Export .mrpack</button><button class="btn btn-primary sm" data-mpp="${esc(i.id)}">🚀 Publish</button></div>`).join('') : '<p class="fine">No modded instances yet.</p>'}
+      </div>`;
+    $('#mp-new').onclick = () => openCreate(false);
+    $('#create-body').onclick = async e => {
+      const x = e.target.closest('[data-mpx]');
+      if (x) { const inst = state.instances.find(i => i.id === x.dataset.mpx); x.disabled = true; try { const r = await lab.publish.prepare({ kind: 'modpack', instanceId: inst.id, name: inst.name, version: '1.0.0' }); const f = await lab.publish.save(r.file); if (f) toast('Modpack saved!', 'ok'); } catch (err) { toast(errMsg(err), 'err'); } x.disabled = false; }
+      const pb = e.target.closest('[data-mpp]'); if (pb) { showView('publish'); Publish.start('modpack', pb.dataset.mpp); }
+    };
+  };
+
+  window.Create = { open, go: sec => { C.section = sec; open(); } };
 })();

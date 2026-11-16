@@ -10,7 +10,10 @@
     "dist:mac": "electron-builder --mac",
     "dist:linux": "electron-builder --linux"
   },
-  "author": "VividP1xels",
+  "author": {
+    "name": "VividP1xels",
+    "email": "VividP1xels@users.noreply.github.com"
+  },
   "license": "MIT",
   "dependencies": {
     "adm-zip": "^0.6.1",
@@ -35,7 +38,20 @@
       "package.json"
     ],
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -43,15 +59,50 @@
       "artifactName": "P1xel-Lab-Setup.${ext}"
     },
     "mac": {
-      "target": "dmg",
-      "category": "public.app-category.games"
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.games",
+      "identity": "-",
+      "artifactName": "P1xel-Lab-Mac.${ext}"
     },
     "linux": {
-      "target": "AppImage",
-      "category": "Game"
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Game",
+      "maintainer": "VividP1xels",
+      "artifactName": "P1xel-Lab-Linux.${ext}"
     },
     "portable": {
       "artifactName": "P1xel-Lab-Portable.${ext}"
+    },
+    "dmg": {
+      "title": "P1xel Lab"
+    },
+    "deb": {
+      "depends": [
+        "libnss3",
+        "libgtk-3-0",
+        "libxss1"
+      ]
     }
-  }
+  },
+  "homepage": "https://github.com/VividP1xels/p1xel-lab"
 }

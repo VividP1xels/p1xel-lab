@@ -49,8 +49,9 @@ async function onSignedIn(user) {
   state.user = user;
   $('#acc-name').textContent = user.name; $('#acc-skin').src = user.skin; $('#tut-name').textContent = user.name;
   state.settings = await lab.getSettings();
+  applyTheme(state.settings.accent);
   state.instances = await lab.listInstances();
-  Social.start();
+  Social.start().then(() => Profile.renderAccount());
   Notes.start();
   if (user.offline) toast("You're offline. Showing your saved stuff until you reconnect.");
   if (!state.settings.tutorialDone) startTutorial();
@@ -160,7 +161,7 @@ $('#btn-new').onclick = () => openCreate(false);
 $('#empty-new').onclick = () => openCreate(false);
 
 // ---------- views (instance / friends / servers / mod maker) ----------
-const VIEWS = ['inst-view', 'empty-state', 'friends-view', 'servers-view', 'maker-view', 'publish-view'];
+const VIEWS = ['inst-view', 'empty-state', 'friends-view', 'servers-view', 'maker-view', 'publish-view', 'profile-view'];
 function showView(v) {
   if (v !== 'friends') Social.close();
   VIEWS.forEach(id => $('#' + id).classList.add('hidden'));
@@ -170,7 +171,10 @@ function showView(v) {
   if (v === 'servers') Servers.open();
   if (v === 'maker') Create.open();
   if (v === 'publish') Publish.open();
+  if (v === 'profile') Profile.open();
 }
+$('#nav-profile').onclick = () => showView('profile');
+$('#acc-skin').onclick = () => { showView('maker'); Create.go('skin'); };
 $('#nav-publish').onclick = () => showView('publish');
 $('#nav-servers').onclick = () => showView('servers');
 $('#nav-maker').onclick = () => showView('maker');
@@ -194,7 +198,7 @@ $('#inst-list').onclick = e => { const it = e.target.closest('.inst-item'); if (
 async function selectInstance(id) {
   Social.close();
   $$('.nav-btn[data-view]').forEach(b => b.classList.remove('active'));
-  $('#servers-view').classList.add('hidden'); $('#maker-view').classList.add('hidden'); $('#publish-view').classList.add('hidden');
+  ['servers-view', 'maker-view', 'publish-view', 'profile-view'].forEach(v => $('#' + v).classList.add('hidden'));
   state.current = await lab.getInstance(id);
   const i = state.current;
   $('#empty-state').classList.add('hidden'); $('#inst-view').classList.remove('hidden');
@@ -221,11 +225,72 @@ function updateCounts() {
   $('#iv-count').textContent = `${n} mod${n === 1 ? '' : 's'}`;
   $('#tab-count').textContent = all.length ? `(${all.length})` : '';
   $('#iv-count').classList.toggle('hidden', state.current.loader === 'vanilla');
+  const ms = state.current.playtime || 0, h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60;
+  $('#iv-time').textContent = ms ? `⏱ ${h ? h + 'h ' : ''}${m}m played` : '⏱ Not played yet';
 }
+// ---------- worlds & screenshots ----------
+const fmtBytes = b => b > 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+async function renderWorlds() {
+  const id = state.current.id, box = $('#tab-worlds');
+  const list = await lab.worlds.list(id);
+  box.innerHTML = `<div class="add-files"><button class="btn btn-ghost" id="w-open">📂 Open saves folder</button><span class="muted">Worlds you make in this instance show up here.</span></div>
+    <div class="results">${list.length ? list.map(w => `<div class="mod world">${w.icon ? `<img src="${w.icon}" alt="">` : '<div class="noimg"></div>'}<div class="body"><h4>${esc(w.name)}</h4><span class="by">Last played ${new Date(w.played).toLocaleString()} · ${fmtBytes(w.size)}</span>
+      <div class="foot"><button class="btn btn-ghost sm" data-wact="backup" data-w="${esc(w.name)}">💾 Back up</button><button class="btn btn-ghost sm" data-wact="open" data-w="${esc(w.name)}">📂 Folder</button><button class="btn btn-ghost sm danger" data-wact="delete" data-w="${esc(w.name)}">Delete</button></div></div></div>`).join('') : '<div class="loading">No worlds yet. Press Play and make one!</div>'}</div>`;
+  $('#w-open').onclick = () => lab.worlds.open({ id });
+  box.querySelector('.results').onclick = async e => {
+    const b = e.target.closest('[data-wact]'); if (!b) return;
+    const name = b.dataset.w;
+    try {
+      if (b.dataset.wact === 'backup') { b.disabled = true; const f = await lab.worlds.backup({ id, name }); toast(`Backed up ${name} → ${f}`, 'ok'); b.disabled = false; }
+      if (b.dataset.wact === 'open') lab.worlds.open({ id, name });
+      if (b.dataset.wact === 'delete' && confirm(`Delete the world "${name}"? This can't be undone. (Tip: back it up first!)`)) { await lab.worlds.remove({ id, name }); renderWorlds(); }
+    } catch (err) { toast(errMsg(err), 'err'); b.disabled = false; }
+  };
+}
+async function renderShots() {
+  const id = state.current.id, box = $('#tab-shots');
+  const list = await lab.shots.list(id);
+  box.innerHTML = `<div class="add-files"><button class="btn btn-ghost" id="sh-open">📂 Open folder</button><span class="muted">Press <b>F2</b> in Minecraft to take a screenshot.</span></div>
+    <div class="shots">${list.length ? list.map(s => `<figure class="shot"><img src="${s.url}" alt="" loading="lazy" data-sopen="${esc(s.file)}"><figcaption>${new Date(s.time).toLocaleString()}
+      <span><button class="mini" data-spost="${esc(s.file)}" title="Post to your feed">📰</button><button class="mini" data-sdel="${esc(s.file)}" title="Delete">🗑</button></span></figcaption></figure>`).join('') : '<div class="loading">No screenshots yet.</div>'}</div>`;
+  $('#sh-open').onclick = () => lab.shots.open({ id });
+  box.querySelector('.shots').onclick = async e => {
+    const t = e.target;
+    if (t.dataset.sopen) lab.shots.open({ id, file: t.dataset.sopen });
+    if (t.dataset.sdel && confirm('Delete this screenshot?')) { await lab.shots.remove({ id, file: t.dataset.sdel }); renderShots(); }
+    if (t.dataset.spost) {
+      try {
+        const pid = [...crypto.getRandomValues(new Uint8Array(12))].map(b => b.toString(16).padStart(2, '0')).join('');
+        const { base64 } = await lab.files.read(await lab.shots.path({ id, file: t.dataset.spost }));
+        const m = await lab.posts.saveMedia({ id: pid, name: t.dataset.spost, base64 });
+        const text = prompt('Add a caption for your post (optional):', `Playing ${state.current.name}`);
+        if (text === null) return;
+        await Social.createPost(text, { ...m, id: pid }); toast('Posted to your feed! 📰', 'ok');
+      } catch (err) { toast(errMsg(err), 'err'); }
+    }
+  };
+}
+// ---------- mod updates ----------
+$('#check-upd').onclick = async () => {
+  const b = $('#check-upd'); b.disabled = true; b.textContent = 'Checking…';
+  try {
+    const ups = await lab.checkModUpdates(state.current.id);
+    if (!ups.length) toast('Everything is up to date! ✨', 'ok');
+    else if (confirm(`${ups.length} update${ups.length > 1 ? 's' : ''} found:\n\n${ups.map(u => `• ${u.title}: ${u.from} → ${u.to}`).join('\n')}\n\nUpdate them all?`)) {
+      b.textContent = 'Updating…';
+      const r = await lab.updateMods({ id: state.current.id, files: ups.map(u => u.file) });
+      state.current = r.instance; updateCounts(); renderInstalled();
+      toast(`Updated ${r.updated.length} file${r.updated.length === 1 ? '' : 's'}! ⬆`, 'ok');
+    }
+  } catch (e) { toast(errMsg(e), 'err'); }
+  b.disabled = false; b.textContent = '⬆ Check for updates';
+};
 function setTab(t) {
   $$('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === t));
-  ['browse', 'installed', 'log'].forEach(k => $('#tab-' + k).classList.toggle('hidden', k !== t));
+  ['browse', 'installed', 'worlds', 'shots', 'log'].forEach(k => $('#tab-' + k).classList.toggle('hidden', k !== t));
   if (t === 'installed') renderInstalled();
+  if (t === 'worlds') renderWorlds();
+  if (t === 'shots') renderShots();
 }
 $('.tabs').onclick = e => { const t = e.target.closest('.tab'); if (t) setTab(t.dataset.tab); };
 
@@ -515,8 +580,16 @@ lab.onLaunchClosed(({ id, code }) => {
 });
 
 // ---------- settings ----------
+function applyTheme(hex) {
+  const root = document.documentElement.style;
+  if (!/^#[0-9a-f]{6}$/i.test(hex || '')) { root.removeProperty('--purple'); return; }
+  root.setProperty('--purple', hex);
+}
+ColorPicker.bind($('#s-theme'), () => state.settings.accent || '#a24bff', h => { applyTheme(h); state.settings.accent = h; lab.setSettings({ accent: h }); });
+$('#s-theme-reset').onclick = () => { applyTheme(''); state.settings.accent = ''; lab.setSettings({ accent: '' }); $('#s-theme').style.setProperty('--c', '#a24bff'); };
 $('#btn-settings').onclick = async () => {
   state.settings = await lab.getSettings();
+  $('#s-theme').style.setProperty('--c', state.settings.accent || '#a24bff');
   $('#s-ram').value = state.settings.ramMB; $('#ram-val').textContent = (state.settings.ramMB / 1024).toFixed(1) + ' GB';
   $('#s-java').value = state.settings.javaPath; $('#s-cf').value = '';
   $('#s-cf-state').textContent = state.settings.curseforgeKeySet ? '(saved ✓)' : '(not set)';

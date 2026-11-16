@@ -60,6 +60,7 @@
     else if (a.type === 'friends') $('#nav-friends').click();
     else if (a.type === 'instance' && state.instances.some(i => i.id === a.id)) selectInstance(a.id);
     else if (a.type === 'update') showUpdate();
+    else if (a.type === 'feed') { showView('profile'); Profile.open('feed'); }
   };
   // Mark a friend's notifications read when you open their chat
   function readGroup(group) { let ch = false; list.forEach(n => { if (n.group === group && !n.read) { n.read = true; ch = true; } }); if (ch) { persist(); render(); } }

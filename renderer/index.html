@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data: p1xicon:; connect-src 'self' https: wss:; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data: p1xicon: p1xshot: p1xmedia:; connect-src 'self' https: wss:; media-src 'self' blob: mediastream: p1xmedia:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'">
   <title>P1xel Lab</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -88,6 +88,10 @@
         <svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges"><path fill="currentColor" d="M4 2h3v1h1v3H7v1H4V6H3V3h1zM10 3h2v1h1v2h-1v1h-2V6H9V4h1zM2 9h7v1h1v4H1v-4h1zM11 9h3v1h1v3h-4z"/></svg>
         Friends <small id="friends-online"></small><span class="badge hidden" id="friends-badge"></span>
       </button>
+      <button class="nav-btn" id="nav-profile" data-view="profile">
+        <svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges"><path fill="currentColor" d="M5 1h6v1h1v5h-1v1H5V7H4V2h1zM3 9h10v1h1v5H2v-5h1z"/></svg>
+        Profile
+      </button>
       <button class="nav-btn" id="nav-servers" data-view="servers">
         <svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges"><path fill="currentColor" d="M2 2h12v5H2zM2 9h12v5H2z"/><path fill="#0d0b14" d="M4 4h1v1H4zM4 11h1v1H4zM7 4h5v1H7zM7 11h5v1H7z"/></svg>
         Servers <small id="servers-running"></small>
@@ -127,7 +131,7 @@
           <div class="inst-icon lg" id="iv-icon"></div>
           <div class="inst-meta">
             <h2 id="iv-name"></h2>
-            <div class="tags"><span class="tag" id="iv-ver"></span><span class="tag" id="iv-loader"></span><span class="tag" id="iv-count"></span></div>
+            <div class="tags"><span class="tag" id="iv-ver"></span><span class="tag" id="iv-loader"></span><span class="tag" id="iv-count"></span><span class="tag" id="iv-time"></span></div>
           </div>
           <div class="inst-actions">
             <button class="btn btn-boost" id="iv-boost" title="Add mods that make Minecraft load and run faster">⚡ Speed Boost</button>
@@ -142,6 +146,8 @@
         <div class="tabs">
           <button class="tab active" data-tab="browse">Browse</button>
           <button class="tab" data-tab="installed">Installed <span id="tab-count"></span></button>
+          <button class="tab" data-tab="worlds">Worlds</button>
+          <button class="tab" data-tab="shots">Screenshots</button>
           <button class="tab" data-tab="log">Game log</button>
         </div>
 
@@ -172,12 +178,15 @@
         </div>
 
         <div class="tab-body hidden" id="tab-installed">
-          <div class="add-files"><button class="btn btn-ghost" id="add-jar">+ Add .jar file</button><span class="muted">Got a mod from another website or Discord? Add it here, or drag the file onto this window.</span></div>
+          <div class="add-files"><button class="btn btn-ghost" id="add-jar">+ Add .jar file</button><button class="btn btn-ghost" id="check-upd">⬆ Check for updates</button><span class="muted">Got a mod from another website or Discord? Add it here, or drag the file onto this window.</span></div>
           <div id="installed-list" class="installed"></div>
         </div>
+        <div class="tab-body hidden" id="tab-worlds"></div>
+        <div class="tab-body hidden" id="tab-shots"></div>
         <div class="tab-body hidden" id="tab-log"><pre id="log" class="log">Press Play and the game output will show up here.</pre></div>
       </div>
       <div id="servers-view" class="hidden"></div>
+      <div id="profile-view" class="hidden"></div>
       <div id="maker-view" class="hidden"></div>
       <div id="publish-view" class="hidden"></div>
       <div id="friends-view" class="hidden">
@@ -203,6 +212,8 @@
       <div class="dlg-row end"><button class="btn btn-ghost" type="button" id="md-web" data-url="">View website</button><button class="btn btn-ghost" value="close">Close</button><button class="btn btn-primary" type="button" id="md-install">Install</button></div>
     </form>
   </dialog>
+
+  <dialog id="profile-dlg" class="profile-dlg"></dialog>
 
   <!-- NOTIFICATIONS -->
   <div class="notif-panel hidden" id="notif-panel">
@@ -251,6 +262,8 @@
       <div class="dlg-row">
         <button class="btn btn-ghost" value="tutorial" id="s-tutorial">Replay tutorial</button>
         <button class="btn btn-ghost" id="s-update">Check for updates</button>
+      </div>
+      <div class="field"><span>Launcher color</span><div class="row"><button type="button" class="cp-btn" id="s-theme" style="--c:#a24bff"><i></i>RGB</button><button class="btn btn-ghost" id="s-theme-reset" type="button">Default</button></div>
         <button class="btn btn-ghost danger" value="logout" id="s-logout">Sign out</button>
       </div>
       <div class="dlg-row end"><span class="fine ver">P1xel Lab <span id="app-version"></span></span><button class="btn btn-ghost" value="cancel">Cancel</button><button class="btn btn-primary" value="save" id="s-save">Save</button></div>
@@ -262,6 +275,7 @@
   <div class="toast-host" id="toasts"></div>
   <script src="pixels.js"></script>
   <script src="vendor/peerjs.min.js"></script>
+  <script src="colorpicker.js"></script>
   <script src="app.js"></script>
   <script src="notifications.js"></script>
   <script src="social.js"></script>
@@ -269,5 +283,6 @@
   <script src="maker.js"></script>
   <script src="creator.js"></script>
   <script src="publish.js"></script>
+  <script src="profile.js"></script>
 </body>
 </html>

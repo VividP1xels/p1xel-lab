@@ -62,12 +62,26 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
 }
-protocol.registerSchemesAsPrivileged([{ scheme: 'p1xicon', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+protocol.registerSchemesAsPrivileged([{ scheme: 'p1xicon', privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: 'p1xshot', privileges: { standard: true, secure: true, supportFetchAPI: true } }, { scheme: 'p1xmedia', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 app.whenReady().then(() => {
   // Cached mod icons, so they still show with no internet
   protocol.handle('p1xicon', req => {
     const name = path.basename(new URL(req.url).pathname);
     return net.fetch(pathToFileURL(path.join(ICONS(), name)).toString());
+  });
+  // Screenshots and world icons from an instance: p1xshot://<instance>/<path>
+  protocol.handle('p1xshot', req => {
+    const u = new URL(req.url);
+    const file = safeJoin(instDir(path.basename(u.hostname)), decodeURIComponent(u.pathname).replace(/^\/+/, ''));
+    if (!/\.png$/i.test(file)) return new Response('no', { status: 404 });
+    return net.fetch(pathToFileURL(file).toString());
+  });
+  // Post pictures and videos: p1xmedia://<post id>/<file>
+  protocol.handle('p1xmedia', req => {
+    const u = new URL(req.url);
+    const file = safeJoin(path.join(POSTS(), path.basename(u.hostname)), path.basename(decodeURIComponent(u.pathname)));
+    if (!MEDIA_EXT.test(file)) return new Response('no', { status: 404 });
+    return net.fetch(pathToFileURL(file).toString(), { headers: req.headers });
   });
   // Microphone/camera for friend calls (only our own pages ask)
   const ok = (wc, perm) => ['media', 'notifications'].includes(perm) && wc.getURL().startsWith('file://');
@@ -152,11 +166,12 @@ ipcMain.handle('store:get', () => {
     curseforgeKeySet: !!loadSecret('cfKey'),
     ramMB: s.ramMB || 4096,
     javaPath: s.javaPath || '',
+    accent: s.accent || '',
   };
 });
 ipcMain.handle('store:set', (_e, patch) => {
   const allowed = {};
-  for (const k of ['tutorialDone', 'ramMB', 'javaPath']) if (k in patch) allowed[k] = patch[k];
+  for (const k of ['tutorialDone', 'ramMB', 'javaPath', 'accent']) if (k in patch) allowed[k] = patch[k];
   if ('curseforgeKey' in patch) saveSecret('cfKey', patch.curseforgeKey || '');
   writeStore(allowed);
   return true;
@@ -709,7 +724,12 @@ ipcMain.handle('game:launch', async (_e, id) => {
   launcher.on('progress', p => send('launch:status', { id, stage: `Downloading ${p.type}…`, pct: p.total ? p.task / p.total : 0 }));
   launcher.on('debug', m => send('launch:log', { id, line: String(m) }));
   launcher.on('data', m => send('launch:log', { id, line: String(m) }));
-  launcher.on('close', code => { running.delete(id); playing = running.size ? playing : null; send('launch:closed', { id, code }); });
+  const startedAt = Date.now();
+  launcher.on('close', async code => {
+    running.delete(id); playing = running.size ? playing : null;
+    try { const i2 = await readInstance(id); i2.playtime = (i2.playtime || 0) + Math.max(0, Date.now() - startedAt); await writeInstance(i2); } catch {}
+    send('launch:closed', { id, code });
+  });
   const proc = await launcher.launch({
     root: MC_ROOT(),
     authorization: currentUser,
@@ -1315,8 +1335,9 @@ function buildModFiles(mod, mc) {
     const key = {};
     for (const [item, k] of Object.entries(keyOf)) key[k] = newRecipes ? item : { item };
     const comps = {};
-    if (it.displayName) comps['minecraft:custom_name'] = text(it.displayName, it.color || 'white');
-    if (it.lore) comps['minecraft:lore'] = [text(it.lore, 'gray')];
+    const color = /^#[0-9a-f]{6}$/i.test(it.color || '') ? it.color.toLowerCase() : (it.color || 'white');
+    if (it.displayName) comps['minecraft:custom_name'] = text(it.displayName, color);
+    if (it.lore) comps['minecraft:lore'] = [text(it.lore, /^#[0-9a-f]{6}$/i.test(it.loreColor || '') ? it.loreColor : 'gray')];
     const ench = {};
     for (const e of it.enchantments || []) if (e.id && e.level > 0) ench[mcId(e.id)] = Math.min(255, Math.max(1, Math.round(e.level)));
     if (Object.keys(ench).length) comps['minecraft:enchantments'] = { levels: ench };
@@ -1679,7 +1700,7 @@ ipcMain.handle('publish:token', (_e, token) => {
   return !!loadSecret('mrToken');
 });
 // Publish to Modrinth with the creator's own Modrinth token: creates a draft project + uploads the file
-ipcMain.handle('publish:modrinth', async (_e, { kind, file, title, slug, summary, body, categories, mcVersions, loaders, version, iconDataUrl }) => {
+ipcMain.handle('publish:modrinth', async (_e, { kind, file, title, slug, summary, body, categories, mcVersions, loaders, version, iconDataUrl, visibility }) => {
   const token = loadSecret('mrToken');
   if (!token) throw new Error('Add your Modrinth token first.');
   const auth = { Authorization: token, 'User-Agent': UA };
@@ -1698,6 +1719,7 @@ ipcMain.handle('publish:modrinth', async (_e, { kind, file, title, slug, summary
     slug, title, description: summary, body: body || summary, categories: categories || [], additional_categories: [],
     client_side: kind === 'datapack' ? 'optional' : 'required', server_side: kind === 'mod' || kind === 'datapack' ? 'optional' : kind === 'modpack' ? 'optional' : 'unsupported',
     license_id: 'LicenseRef-All-Rights-Reserved', project_type: projectType, initial_versions: [], is_draft: true,
+    requested_status: ['approved', 'unlisted', 'private'].includes(visibility) ? visibility : 'approved',
   }));
   if (iconDataUrl?.startsWith('data:image/png;base64,')) form.append('icon', new Blob([Buffer.from(iconDataUrl.split(',')[1], 'base64')], { type: 'image/png' }), 'icon.png');
   const project = await post(`${MR}/project`, form);
@@ -1931,3 +1953,230 @@ ipcMain.handle('creator:export', async (_e, { kind, item, mcVersion }) => {
   return { file: out, mcVersions: kind === 'shader' ? [] : [mcVersion], loaders: kind === 'shader' ? ['iris', 'optifine'] : ['minecraft'] };
 });
 ipcMain.handle('creator:shaderSource', (_e, item) => shaderSources(item).fsh);
+
+// ---------- skins & capes (your real Minecraft account) ----------
+const MCS = 'https://api.minecraftservices.com/minecraft/profile';
+function mcAuth() {
+  if (!currentUser?.access_token) throw new Error('Sign in with Microsoft first.');
+  return { Authorization: `Bearer ${currentUser.access_token}`, 'User-Agent': UA };
+}
+async function mcFetch(url, opts = {}) {
+  const r = await fetch(url, { ...opts, headers: { ...mcAuth(), ...(opts.headers || {}) } });
+  if (r.status === 401) throw new Error('Your sign-in expired. Sign out and back in, then try again.');
+  if (r.status === 429) throw new Error('Minecraft says slow down. Wait a minute and try again.');
+  if (!r.ok) { let msg = ''; try { msg = (await r.json()).errorMessage || ''; } catch {} throw new Error(`Minecraft said ${r.status}${msg ? ': ' + msg : ''}`); }
+  return r.status === 204 ? null : r.json();
+}
+const toDataUrl = async url => { const r = await fetch(url, { headers: { 'User-Agent': UA } }); return 'data:image/png;base64,' + Buffer.from(await r.arrayBuffer()).toString('base64'); };
+ipcMain.handle('skins:profile', async () => {
+  const p = await mcFetch(MCS);
+  const skin = (p.skins || []).find(s => s.state === 'ACTIVE') || p.skins?.[0];
+  return {
+    name: p.name, variant: skin?.variant === 'SLIM' ? 'slim' : 'classic',
+    skin: skin ? await toDataUrl(skin.url) : null,
+    capes: await Promise.all((p.capes || []).map(async c => ({ id: c.id, alias: c.alias, active: c.state === 'ACTIVE', image: await toDataUrl(c.url).catch(() => '') }))),
+  };
+});
+function checkSkinPng(dataUrl) {
+  if (!String(dataUrl).startsWith('data:image/png;base64,')) throw new Error('A skin must be a PNG image.');
+  const buf = Buffer.from(dataUrl.split(',')[1], 'base64');
+  const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20);
+  if (w !== 64 || (h !== 64 && h !== 32)) throw new Error('A skin must be 64×64 pixels (or the old 64×32).');
+  return buf;
+}
+ipcMain.handle('skins:upload', async (_e, { png, variant }) => {
+  const buf = checkSkinPng(png);
+  const form = new FormData();
+  form.append('variant', variant === 'slim' ? 'slim' : 'classic');
+  form.append('file', new Blob([buf], { type: 'image/png' }), 'skin.png');
+  await mcFetch(`${MCS}/skins`, { method: 'POST', body: form });
+  return true;
+});
+ipcMain.handle('skins:reset', () => mcFetch(`${MCS}/skins/active`, { method: 'DELETE' }));
+ipcMain.handle('skins:cape', (_e, capeId) => capeId
+  ? mcFetch(`${MCS}/capes/active`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ capeId }) })
+  : mcFetch(`${MCS}/capes/active`, { method: 'DELETE' }));
+const SKIN_DIR = () => path.join(DATA(), 'skins');
+ipcMain.handle('skins:library', async () => {
+  await fsp.mkdir(SKIN_DIR(), { recursive: true });
+  const out = [];
+  for (const f of await fsp.readdir(SKIN_DIR())) if (f.endsWith('.json')) { try { out.push(JSON.parse(await fsp.readFile(path.join(SKIN_DIR(), f), 'utf8'))); } catch {} }
+  return out.sort((a, b) => b.updated - a.updated);
+});
+ipcMain.handle('skins:save', async (_e, item) => {
+  checkSkinPng(item.png);
+  await fsp.mkdir(SKIN_DIR(), { recursive: true });
+  item.updated = Date.now();
+  await fsp.writeFile(path.join(SKIN_DIR(), `${path.basename(item.uid)}.json`), JSON.stringify(item));
+  return item;
+});
+ipcMain.handle('skins:delete', (_e, uid) => fsp.rm(path.join(SKIN_DIR(), `${path.basename(uid)}.json`), { force: true }));
+ipcMain.handle('skins:importFile', async () => {
+  const r = await dialog.showOpenDialog(win, { title: 'Pick a skin', properties: ['openFile'], filters: [{ name: 'Skin', extensions: ['png'] }] });
+  if (r.canceled) return null;
+  const url = 'data:image/png;base64,' + (await fsp.readFile(r.filePaths[0])).toString('base64');
+  checkSkinPng(url);
+  return { png: url, name: path.basename(r.filePaths[0], '.png') };
+});
+ipcMain.handle('skins:export', async (_e, { png, name }) => {
+  const buf = checkSkinPng(png);
+  const r = await dialog.showSaveDialog(win, { title: 'Save skin', defaultPath: `${ID(name || 'skin')}.png`, filters: [{ name: 'Skin', extensions: ['png'] }] });
+  if (r.canceled) return null;
+  await fsp.writeFile(r.filePath, buf);
+  return r.filePath;
+});
+
+// ---------- private sharing: send your files straight to a friend ----------
+const RECEIVED = () => path.join(DATA(), 'received');
+const SHARE_LIMIT = 40 * 1024 * 1024;
+ipcMain.handle('files:read', async (_e, file) => {
+  const st = await fsp.stat(file);
+  if (st.size > SHARE_LIMIT) throw new Error('That file is over 40 MB, too big to send to a friend. Use Save file and share it another way.');
+  return { name: path.basename(file), base64: (await fsp.readFile(file)).toString('base64') };
+});
+ipcMain.handle('files:saveReceived', async (_e, { name, base64 }) => {
+  const safe = path.basename(String(name)).replace(/[^\w.\- ]+/g, '_').slice(0, 120);
+  if (!/\.(jar|zip|mrpack|png)$/i.test(safe)) throw new Error('Only mods, packs and skins can be received.');
+  await fsp.mkdir(RECEIVED(), { recursive: true });
+  let out = path.join(RECEIVED(), safe), n = 2;
+  while (fs.existsSync(out)) out = path.join(RECEIVED(), safe.replace(/(\.\w+)$/, ` (${n++})$1`));
+  await fsp.writeFile(out, Buffer.from(base64, 'base64'));
+  return out;
+});
+ipcMain.handle('files:installReceived', async (_e, { file, kind, instanceId }) => {
+  if (!path.resolve(file).startsWith(path.resolve(RECEIVED()) + path.sep) || !fs.existsSync(file)) throw new Error('That file is gone. Ask your friend to send it again.');
+  if (kind === 'modpack') { const r = await importPackFile(file, {}); return { instance: r.inst, newInstance: true }; }
+  const type = TYPES[kind] && kind !== 'modpack' ? kind : 'mod';
+  const inst = await readInstance(instanceId);
+  const name = path.basename(file);
+  await fsp.mkdir(path.join(instDir(inst.id), TYPES[type].dir), { recursive: true });
+  await fsp.copyFile(file, path.join(instDir(inst.id), TYPES[type].dir, name));
+  inst.mods = (inst.mods || []).filter(m => m.file !== name);
+  inst.mods.push({ source: 'friend', projectId: name, title: name.replace(/\.(jar|zip)$/i, ''), icon: '', version: 'From a friend', file: name, type });
+  await writeInstance(inst);
+  return { instance: inst };
+});
+
+// ---------- mod updates (Modrinth) ----------
+async function latestFor(inst, m) {
+  const type = m.type === 'clientmod' ? 'mod' : (m.type || 'mod');
+  const p = new URLSearchParams({ game_versions: JSON.stringify([inst.mcVersion]) });
+  const LF = { shader: ['iris', 'optifine'], resourcepack: ['minecraft'], datapack: ['datapack'] };
+  if (type === 'mod' && inst.loader !== 'vanilla') p.set('loaders', JSON.stringify(inst.loader === 'quilt' ? ['quilt', 'fabric'] : [inst.loader]));
+  else if (LF[type]) p.set('loaders', JSON.stringify(LF[type]));
+  const versions = await getJSON(`${MR}/project/${m.projectId}/version?${p}`);
+  return versions.find(x => x.version_type === 'release') || versions[0];
+}
+ipcMain.handle('mods:checkUpdates', async (_e, id) => {
+  const inst = await readInstance(id);
+  const list = (inst.mods || []).filter(m => m.source === 'modrinth');
+  const out = [];
+  await pool(list, 6, async m => {
+    try { const v = await latestFor(inst, m); if (v && v.version_number !== m.version) out.push({ file: m.file, title: m.title, from: m.version, to: v.version_number, icon: m.icon }); } catch {}
+  });
+  return out;
+});
+ipcMain.handle('mods:update', async (_e, { id, files }) => {
+  const inst = await readInstance(id);
+  const done = [];
+  for (const file of files) {
+    const m = inst.mods.find(x => x.file === file && x.source === 'modrinth'); if (!m) continue;
+    const type = m.type || 'mod';
+    await fsp.rm(path.join(instDir(id), TYPES[type]?.dir || 'mods', m.file), { force: true });
+    inst.mods = inst.mods.filter(x => x !== m);
+    try { done.push(...(await installModrinth(inst, m.projectId, new Set(), type)).map(a => a.title)); }
+    catch (e) { inst.mods.push(m); console.warn('update failed', m.title, e.message); }
+    send('mods:progress', { title: m.title, stage: 'updating' });
+  }
+  await writeInstance(inst);
+  send('mods:progress', null);
+  return { instance: inst, updated: done };
+});
+
+// ---------- worlds & screenshots ----------
+async function dirSize(d) {
+  let total = 0;
+  for (const e of await fsp.readdir(d, { withFileTypes: true }).catch(() => [])) {
+    const p = path.join(d, e.name);
+    total += e.isDirectory() ? await dirSize(p) : (await fsp.stat(p).catch(() => ({ size: 0 }))).size;
+  }
+  return total;
+}
+ipcMain.handle('worlds:list', async (_e, id) => {
+  const saves = path.join(instDir(id), 'saves');
+  if (!fs.existsSync(saves)) return [];
+  const out = [];
+  for (const w of await fsp.readdir(saves)) {
+    const lvl = path.join(saves, w, 'level.dat');
+    if (!fs.existsSync(lvl)) continue;
+    out.push({ name: w, size: await dirSize(path.join(saves, w)), played: (await fsp.stat(lvl)).mtimeMs, icon: fs.existsSync(path.join(saves, w, 'icon.png')) ? `p1xshot://${id}/saves/${encodeURIComponent(w)}/icon.png` : '' });
+  }
+  return out.sort((a, b) => b.played - a.played);
+});
+const worldDir = (id, name) => safeJoin(path.join(instDir(id), 'saves'), path.basename(name));
+ipcMain.handle('worlds:backup', async (_e, { id, name }) => {
+  if (running.has(id)) throw new Error('Close Minecraft first so the world is fully saved.');
+  const zip = new AdmZip();
+  zip.addLocalFolder(worldDir(id, name), path.basename(name), f => !/session\.lock$/.test(f));
+  const dir = path.join(instDir(id), 'backups');
+  await fsp.mkdir(dir, { recursive: true });
+  const out = path.join(dir, `${ID(name)}-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.zip`);
+  await fsp.writeFile(out, zip.toBuffer());
+  shell.showItemInFolder(out);
+  return path.basename(out);
+});
+ipcMain.handle('worlds:delete', async (_e, { id, name }) => {
+  if (running.has(id)) throw new Error('Close Minecraft first.');
+  await fsp.rm(worldDir(id, name), { recursive: true, force: true });
+  return true;
+});
+ipcMain.handle('worlds:open', (_e, { id, name }) => shell.openPath(name ? worldDir(id, name) : path.join(instDir(id), 'saves')));
+ipcMain.handle('shots:list', async (_e, id) => {
+  const d = path.join(instDir(id), 'screenshots');
+  if (!fs.existsSync(d)) return [];
+  const out = [];
+  for (const f of await fsp.readdir(d)) if (/\.png$/i.test(f)) out.push({ file: f, url: `p1xshot://${id}/screenshots/${encodeURIComponent(f)}`, time: (await fsp.stat(path.join(d, f))).mtimeMs });
+  return out.sort((a, b) => b.time - a.time);
+});
+ipcMain.handle('shots:open', (_e, { id, file }) => shell.openPath(file ? safeJoin(path.join(instDir(id), 'screenshots'), path.basename(file)) : path.join(instDir(id), 'screenshots')));
+ipcMain.handle('shots:delete', (_e, { id, file }) => fsp.rm(safeJoin(path.join(instDir(id), 'screenshots'), path.basename(file)), { force: true }));
+ipcMain.handle('shots:path', (_e, { id, file }) => safeJoin(path.join(instDir(id), 'screenshots'), path.basename(file)));
+
+// ---------- posts: pictures and videos ----------
+const POSTS = () => path.join(DATA(), 'posts');
+const MEDIA_EXT = /\.(png|jpe?g|gif|webp|mp4|webm|mov)$/i;
+const POST_LIMIT = 40 * 1024 * 1024;
+const postId = id => { if (!/^[0-9a-f]{8,40}$/.test(String(id))) throw new Error('Bad post'); return id; };
+const mediaKind = f => /\.(mp4|webm|mov)$/i.test(f) ? 'video' : 'image';
+ipcMain.handle('posts:addMedia', async (_e, id) => {
+  postId(id);
+  const r = await dialog.showOpenDialog(win, { title: 'Add a picture or video', properties: ['openFile'], filters: [{ name: 'Pictures & videos', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'webm', 'mov'] }] });
+  if (r.canceled) return null;
+  const src = r.filePaths[0];
+  const st = await fsp.stat(src);
+  if (st.size > POST_LIMIT) throw new Error('That file is over 40 MB. Try a shorter video or a smaller picture.');
+  const name = path.basename(src).replace(/[^\w.\- ]+/g, '_').slice(0, 100);
+  await fsp.mkdir(path.join(POSTS(), id), { recursive: true });
+  await fsp.copyFile(src, path.join(POSTS(), id, name));
+  return { name, kind: mediaKind(name), size: st.size, url: `p1xmedia://${id}/${encodeURIComponent(name)}` };
+});
+ipcMain.handle('posts:saveMedia', async (_e, { id, name, base64 }) => {
+  postId(id);
+  const safe = path.basename(String(name)).replace(/[^\w.\- ]+/g, '_').slice(0, 100);
+  if (!MEDIA_EXT.test(safe)) throw new Error('Not a picture or video');
+  const buf = Buffer.from(base64, 'base64');
+  if (buf.length > POST_LIMIT) throw new Error('Too big');
+  await fsp.mkdir(path.join(POSTS(), id), { recursive: true });
+  await fsp.writeFile(path.join(POSTS(), id, safe), buf);
+  return { name: safe, kind: mediaKind(safe), url: `p1xmedia://${id}/${encodeURIComponent(safe)}` };
+});
+ipcMain.handle('posts:readMedia', async (_e, { id, name }) => {
+  const f = safeJoin(path.join(POSTS(), postId(id)), path.basename(name));
+  return (await fsp.readFile(f)).toString('base64');
+});
+ipcMain.handle('posts:deleteMedia', (_e, id) => fsp.rm(path.join(POSTS(), postId(id)), { recursive: true, force: true }));
+
+ipcMain.handle('files:pick', async (_e, { title, exts }) => {
+  const r = await dialog.showOpenDialog(win, { title: title || 'Pick a file', properties: ['openFile'], filters: [{ name: 'Files', extensions: exts || ['jar', 'zip', 'mrpack'] }] });
+  return r.canceled ? null : r.filePaths[0];
+});

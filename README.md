@@ -32,10 +32,26 @@ A Minecraft: Java Edition launcher built for modding, by **[VividP1xels](https:/
 13. **Shaders, resource packs, data packs and modpacks.** The Browse tab has a tab for each type, from both Modrinth and CurseForge. Shaders add Iris (or Oculus on Forge) for you. Data packs are added to every world in the instance when you press Play. Modpacks install as a new instance with the right Minecraft version, loader and files. You can also import a `.mrpack` or CurseForge modpack `.zip` from the New instance screen.
 14. **Publish.** Share things you made: a Mod Maker mod or your own `.jar`, any instance as a modpack (`.mrpack`), a resource pack, a Mod Maker data pack or your own, or a shader. Save the file to share anywhere, or publish it on Modrinth with your own Modrinth token. It's uploaded as a draft, and you click **Submit for review** on Modrinth. CurseForge only allows new projects on its website, so save the file and upload it there.
 
+15. **Profile and feed.** Launcher-only display name (your real Minecraft name is still shown), status, bio, banner color, YouTube link and favorite modpack. Choose who sees it: all friends, or only you. Post text, pictures and videos (up to 40 MB), edit or delete them, and ❤ friends' posts. Posts reach friends who are offline later, too.
+16. **Skins and capes.** Create → Skins: pixel editor with front/back preview, classic or slim arms, import/export PNG, a skin library, and **Wear this skin** to put it on your Minecraft account. Pick or hide your capes.
+17. **Any color.** An RGB color picker (sliders, hex, recent colors) everywhere in Create, for Mod Maker item names, and for the launcher's own theme color.
+18. **Private sharing.** Send mods, packs and modpacks straight to a friend (📎 in chat, or Publish → Send privately). On Modrinth, choose Public, Unlisted or Private.
+19. **More.** Worlds tab (back up, open, delete), Screenshots gallery (post to your feed), one-click mod updates, and playtime for each instance.
+
+## Downloads
+
+Every build makes:
+- **Windows:** `P1xel-Lab-Setup.exe` or `P1xel-Lab-Portable.exe`
+- **Mac** (Intel and Apple Silicon): `P1xel-Lab-Mac.dmg`. The app isn't signed with a paid Apple certificate, so the first time, right-click P1xel Lab and choose **Open**.
+- **Linux:** `P1xel-Lab-Linux.AppImage` (any distro: `chmod +x`, then run it) or `P1xel-Lab-Linux.deb`
+
+Latest: https://github.com/VividP1xels/p1xel-lab/releases/latest
+
 ## How friends work
 
 - Launchers connect to each other directly (peer-to-peer) using [PeerJS](https://peerjs.com)'s free public connection service, so there's no server to run.
 - Nobody can pretend to be someone else. Before anything is accepted, each launcher proves it owns its Minecraft account using Mojang's own check, the same one Minecraft servers use.
+- Profiles and posts can be shared with all your friends or kept private. They can't be fully public, because there's no central server.
 - Both friends need P1xel Lab open and be online for messages to send. Messages written while a friend is offline are kept and sent the next time you're both online.
 - Calls connect directly, so a friend you call can see your IP address, like in most games' voice chat. Only people you've accepted as friends can message or call you.
 

@@ -132,6 +132,8 @@
     const st = myStatus();
     S.conns[u].send({ t: 'status', s: st.s, game: S.playing || '' });
     S.conns[u].send({ t: 'getstatus' });
+    S.conns[u].send({ t: 'profile', profile: profileOut() });
+    if (myProfile().visibility === 'friends') S.conns[u].send({ t: 'posts-index', posts: myPostsIndex() });
     // Deliver anything we wrote while they were offline
     for (const m of S.data.messages[u] || []) if (m.me && m.st === 'sending') S.conns[u].send({ t: 'msg', id: m.id, ts: m.ts, text: m.text, share: m.share });
   }
@@ -144,7 +146,91 @@
     if (S.call?.uuid === u && S.call.state !== 'connected') endCall(`${nameOf(u)} went offline`);
     renderAll();
   }
-  const nameOf = u => S.data.friends[u]?.name || S.conns[u]?.__name || 'Player';
+  const realName = u => S.data.friends[u]?.name || S.conns[u]?.__name || 'Player';
+  const nameOf = u => S.data.profiles?.[u]?.displayName || realName(u);
+  const changed = () => window.dispatchEvent(new Event('social-change'));
+  const HEX = /^#[0-9a-f]{6}$/i;
+  function cleanProfile(p) {
+    if (!p || typeof p !== 'object') return null;
+    const str = (v, n) => String(v || '').replace(/[\u0000-\u001f]/g, ' ').slice(0, n).trim();
+    return { displayName: str(p.displayName, 24), bio: str(p.bio, 300), status: str(p.status, 60), color: HEX.test(p.color) ? p.color : '#8b2cff', youtube: str(p.youtube, 40).replace(/[^\w.@-]/g, ''), favorite: str(p.favorite, 40) };
+  }
+  const myProfile = () => (S.data.profile ||= { displayName: '', bio: '', status: '', color: '#8b2cff', youtube: '', favorite: '', visibility: 'friends' });
+  const profileOut = () => myProfile().visibility === 'friends' ? cleanProfile(myProfile()) : null;
+
+  // ----- big data (files, post media) in small pieces over the friend connection -----
+  const CHUNK = 12000;
+  S.blobs = {};
+  async function sendBlob(u, meta, base64) {
+    const c = S.conns[u]; if (!ready(u)) throw new Error(`${nameOf(u)} is offline.`);
+    const id = hex(), n = Math.ceil(base64.length / CHUNK) || 1;
+    c.send({ t: 'blob-start', id, meta, n });
+    for (let i = 0; i < n; i++) {
+      while (c.dataChannel && c.dataChannel.bufferedAmount > 4 * 1024 * 1024) { await new Promise(r => setTimeout(r, 50)); if (!c.open) throw new Error('Connection lost.'); }
+      c.send({ t: 'blob', id, i, d: base64.slice(i * CHUNK, (i + 1) * CHUNK) });
+      if (meta.kind === 'file' && i % 20 === 0) window.dispatchEvent(new CustomEvent('blob-progress', { detail: { u, pct: i / n } }));
+    }
+    c.send({ t: 'blob-end', id });
+  }
+  async function onBlob(u, meta, base64) {
+    if (meta.kind === 'file') {
+      const path = await lab.files.saveReceived({ name: meta.name, base64 });
+      const list = (S.data.messages[u] ||= []);
+      list.push({ id: hex(), me: false, ts: Date.now(), file: { name: String(meta.name).slice(0, 120), kind: ['mod', 'resourcepack', 'datapack', 'shader', 'modpack', 'skin'].includes(meta.ftype) ? meta.ftype : 'mod', path } });
+      trim(u);
+      if (!(S.open && S.active === u)) S.data.unread[u] = (S.data.unread[u] || 0) + 1;
+      Notes.add({ kind: 'share', title: `${nameOf(u)} sent you ${meta.name}`, body: 'Privately, just for you. Open the chat to add it.', action: { type: 'chat', uuid: u } });
+      toast(`📎 ${nameOf(u)} sent you ${meta.name}`);
+      save(); renderAll();
+      if (ready(u)) S.conns[u].send({ t: 'blob-ack', name: meta.name });
+    } else if (meta.kind === 'postmedia') {
+      const post = S.data.feed[meta.id]; if (!post || post.author !== u) return;
+      const m = await lab.posts.saveMedia({ id: meta.id, name: meta.name, base64 });
+      post.media = { name: m.name, kind: m.kind, url: m.url };
+      save(); changed();
+    }
+  }
+  async function sendFile(u, file, kind) {
+    const { name, base64 } = await lab.files.read(file);
+    const msg = { id: hex(), me: true, ts: Date.now(), st: 'sending', file: { name, kind } };
+    (S.data.messages[u] ||= []).push(msg); save(); renderMessages();
+    try { await sendBlob(u, { kind: 'file', name, ftype: kind }, base64); }
+    catch (e) { msg.st = 'failed'; save(); renderMessages(); throw e; }
+  }
+
+  // ----- posts -----
+  function myPostsIndex() { return (S.data.posts || []).slice(-30).map(p => ({ id: p.id, likes: (p.likes || []).length })); }
+  async function sendPost(u, p) {
+    if (!ready(u)) return;
+    S.conns[u].send({ t: 'post', post: { id: p.id, ts: p.ts, text: p.text, media: p.media ? { name: p.media.name, kind: p.media.kind } : null } });
+    if (p.media) { try { await sendBlob(u, { kind: 'postmedia', id: p.id, name: p.media.name }, await lab.posts.readMedia({ id: p.id, name: p.media.name })); } catch (e) { console.warn('media send failed', e.message); } }
+  }
+  async function createPost(text, media) {
+    if (myProfile().visibility !== 'friends') throw new Error('Your profile is private. Switch it to Friends to post.');
+    const p = { id: media?.id || hex(), ts: Date.now(), text: String(text || '').slice(0, 1000), media: media ? { name: media.name, kind: media.kind, url: media.url } : null, likes: [] };
+    if (!p.text && !p.media) throw new Error('Write something or add a picture/video.');
+    (S.data.posts ||= []).push(p); save(); changed();
+    for (const f of friends()) if (f.state === 'friend' && ready(f.uuid)) sendPost(f.uuid, p);
+    return p;
+  }
+  function deletePost(id) {
+    S.data.posts = (S.data.posts || []).filter(p => p.id !== id);
+    lab.posts.deleteMedia(id).catch(() => {});
+    for (const f of friends()) if (f.state === 'friend' && ready(f.uuid)) S.conns[f.uuid].send({ t: 'post-delete', id });
+    save(); changed();
+  }
+  function editPost(id, text) {
+    const p = (S.data.posts || []).find(x => x.id === id); if (!p) return;
+    p.text = String(text || '').slice(0, 1000); p.edited = Date.now();
+    for (const f of friends()) if (f.state === 'friend' && ready(f.uuid)) S.conns[f.uuid].send({ t: 'post-edit', id, text: p.text });
+    save(); changed();
+  }
+  function likePost(id) {
+    const p = S.data.feed[id]; if (!p) return;
+    p.liked = !p.liked; p.likes = Math.max(0, (p.likes || 0) + (p.liked ? 1 : -1));
+    if (ready(p.author)) S.conns[p.author].send({ t: 'like', id, on: p.liked });
+    save(); changed();
+  }
 
   // ---------- messages between launchers ----------
   function handle(c, u, d) {
@@ -231,6 +317,52 @@
       case 'hangup': if (S.call?.uuid === u) endCall(`${nameOf(u)} ended the call`); return;
       case 'call-decline': if (S.call?.uuid === u) endCall(`${nameOf(u)} declined the call`); return;
       case 'busy': if (S.call?.uuid === u) endCall(`${nameOf(u)} is in another call`); return;
+      case 'profile':
+        if (d.profile) S.data.profiles[u] = cleanProfile(d.profile); else delete S.data.profiles[u];
+        save(); renderAll(); changed(); return;
+      case 'posts-index': {
+        const items = Array.isArray(d.posts) ? d.posts.slice(-30) : [];
+        for (const it of items) { const p = S.data.feed[it.id]; if (p && p.author === u) p.likes = Math.max(0, Number(it.likes) || 0); }
+        const want = items.map(x => String(x.id)).filter(id => !S.data.feed[id]);
+        if (want.length) send({ t: 'posts-want', ids: want.slice(0, 30) });
+        changed(); return;
+      }
+      case 'posts-want': {
+        if (myProfile().visibility !== 'friends') return;
+        for (const id of (d.ids || []).slice(0, 30)) { const p = (S.data.posts || []).find(x => x.id === id); if (p) sendPost(u, p); }
+        return;
+      }
+      case 'post': {
+        const p = d.post || {};
+        if (!/^[0-9a-f]{8,40}$/.test(String(p.id)) || S.data.feed[p.id]) return;
+        S.data.feed[p.id] = { id: p.id, author: u, ts: Math.min(Date.now(), Number(p.ts) || Date.now()), text: String(p.text || '').slice(0, 1000), media: null, pendingMedia: !!p.media, likes: 0, liked: false };
+        const ids = Object.values(S.data.feed).sort((a, b) => b.ts - a.ts).map(x => x.id);
+        for (const old of ids.slice(300)) { delete S.data.feed[old]; lab.posts.deleteMedia(old).catch(() => {}); }
+        if (Date.now() - S.data.feed[p.id].ts < 3600000) Notes.add({ kind: 'share', title: `${nameOf(u)} posted`, body: S.data.feed[p.id].text.slice(0, 80) || (p.media?.kind === 'video' ? '🎬 a video' : '📷 a picture'), action: { type: 'feed' }, group: 'post-' + u });
+        save(); changed(); return;
+      }
+      case 'post-edit': { const p = S.data.feed[d.id]; if (p && p.author === u) { p.text = String(d.text || '').slice(0, 1000); p.edited = true; save(); changed(); } return; }
+      case 'post-delete': { const p = S.data.feed[d.id]; if (p && p.author === u) { delete S.data.feed[d.id]; lab.posts.deleteMedia(d.id).catch(() => {}); save(); changed(); } return; }
+      case 'like': {
+        const p = (S.data.posts || []).find(x => x.id === d.id); if (!p) return;
+        p.likes = (p.likes || []).filter(x => x !== u); if (d.on) { p.likes.push(u); toast(`❤ ${nameOf(u)} liked your post`); }
+        save(); changed(); return;
+      }
+      case 'blob-start':
+        if (Object.keys(S.blobs).length > 4 || !(d.n > 0) || d.n > 5000) return;
+        S.blobs[d.id] = { u, meta: d.meta || {}, n: d.n, parts: [] }; return;
+      case 'blob': { const b = S.blobs[d.id]; if (b && b.u === u && d.i >= 0 && d.i < b.n) b.parts[d.i] = String(d.d); return; }
+      case 'blob-end': {
+        const b = S.blobs[d.id]; delete S.blobs[d.id];
+        if (!b || b.u !== u || b.parts.filter(x => x !== undefined).length !== b.n) return;
+        onBlob(u, b.meta, b.parts.join('')).catch(e => toast(errMsg(e), 'err'));
+        return;
+      }
+      case 'blob-ack': {
+        const m = [...(S.data.messages[u] || [])].reverse().find(x => x.me && x.file && x.file.name === d.name && x.st !== 'delivered');
+        if (m) { m.st = 'delivered'; save(); renderMessages(); }
+        return;
+      }
     }
   }
   function cleanShare(s) {
@@ -292,6 +424,27 @@
     (S.data.messages[u] ||= []).push(msg); trim(u); save();
     if (ready(u)) S.conns[u].send({ t: 'msg', id: msg.id, ts: msg.ts, text: msg.text, share: msg.share });
     renderMessages();
+  }
+  async function addReceivedFile(f, btn) {
+    if (f.kind === 'skin') { window.dispatchEvent(new CustomEvent('open-skin-file', { detail: f.path })); return; }
+    let instanceId = null;
+    if (f.kind !== 'modpack') {
+      const fits = state.instances.filter(i => f.kind === 'mod' || f.kind === 'shader' ? i.loader !== 'vanilla' : true);
+      if (!fits.length) return toast('Make an instance first.', 'err');
+      const pick = state.current && fits.some(i => i.id === state.current.id) ? state.current : fits[0];
+      const names = fits.map((i, n) => `${n + 1}. ${i.name} (${i.mcVersion} ${LOADER_NAME[i.loader]})`).join('\n');
+      const ans = prompt(`Add ${f.name} to which instance? Type its number:\n${names}`, String(fits.indexOf(pick) + 1));
+      if (ans === null) return;
+      const chosen = fits[(parseInt(ans, 10) || 1) - 1]; if (!chosen) return;
+      instanceId = chosen.id;
+    }
+    btn.disabled = true;
+    try {
+      const r = await lab.files.installReceived({ file: f.path, kind: f.kind, instanceId });
+      state.instances = await lab.listInstances(); renderSidebar();
+      toast(r.newInstance ? `📦 Installed ${r.instance.name}!` : `Added ${f.name} to ${r.instance.name}!`, 'ok');
+      btn.textContent = '✓ Added';
+    } catch (e) { toast(errMsg(e), 'err'); btn.disabled = false; }
   }
   async function addSharedInstance(share, btn) {
     if (!navigator.onLine) return toast('You need internet to download the mods.', 'err');
@@ -465,7 +618,7 @@
       const st = statusOf(f.uuid), unread = S.data.unread[f.uuid];
       return `<div class="f-item ${S.active === f.uuid ? 'active' : ''}" data-chat="${f.uuid}">
         <span class="av-wrap"><img class="avatar" src="${avatar(f.uuid)}" alt=""><i class="status-dot ${st.s}"></i></span>
-        <div class="f-txt"><b>${esc(f.name)}</b><small class="${st.s}">${esc(st.label)}</small></div>
+        <div class="f-txt"><b>${esc(nameOf(f.uuid))}${S.data.profiles[f.uuid]?.displayName ? ` <i class="real">@${esc(f.name)}</i>` : ''}</b><small class="${st.s}">${esc(S.data.profiles[f.uuid]?.status && st.s !== 'offline' ? st.label + ' · ' + S.data.profiles[f.uuid].status : st.label)}</small></div>
         ${unread ? `<span class="badge">${unread}</span>` : ''}</div>`;
     }).join('') : `<p class="f-empty">No friends yet. Add someone by their Minecraft username above. They need P1xel Lab too!</p>`;
     $('#f-list').innerHTML = h;
@@ -505,11 +658,12 @@
     const off = st.s === 'offline';
     el.innerHTML = `
       <span class="av-wrap"><img class="avatar" src="${avatar(u, 48)}" alt=""><i class="status-dot ${st.s}"></i></span>
-      <div class="f-txt"><b>${esc(nameOf(u))}</b><small class="${st.s}">${typing ? 'typing…' : esc(st.label)}</small></div>
+      <div class="f-txt"><b class="link-name" data-act="profile" title="See profile">${esc(nameOf(u))}${S.data.profiles[u]?.displayName ? ` <i class="real">@${esc(realName(u))}</i>` : ''}</b><small class="${st.s}">${typing ? 'typing…' : esc(st.label)}</small></div>
       <div class="chat-actions">
         <button class="icon-btn lg" data-act="voice" title="Voice call" ${off ? 'disabled' : ''}>📞</button>
         <button class="icon-btn lg" data-act="video" title="Video call" ${off ? 'disabled' : ''}>🎥</button>
         <button class="icon-btn lg" data-act="share" title="Share an instance">📦</button>
+        <button class="icon-btn lg" data-act="sendfile" title="Send a file privately" ${st.s === 'offline' ? 'disabled' : ''}>📎</button>
         <button class="icon-btn lg" data-act="more" title="More">⋯</button>
         <div class="menu hidden" id="chat-menu">
           <button data-act="remove">Remove friend</button>
@@ -527,7 +681,10 @@
       const sep = day !== lastDay ? `<div class="day">${day === new Date().toDateString() ? 'Today' : esc(day)}</div>` : '';
       lastDay = day;
       if (m.sys) return sep + `<div class="sys">${esc(m.text)} · ${time(m.ts)}</div>`;
-      const body = m.share
+      const body = m.file
+        ? `<div class="share-card"><span class="n-ico">📎</span><div><b>${esc(m.file.name)}</b><small>${esc({ mod: 'Mod', resourcepack: 'Resource pack', datapack: 'Data pack', shader: 'Shader', modpack: 'Modpack', skin: 'Skin' }[m.file.kind] || 'File')} · sent privately${m.me && m.st === 'failed' ? ' · ⚠ failed' : ''}</small></div>
+           ${m.me ? '' : `<button class="btn btn-primary" data-addfile="${i}">${m.file.kind === 'modpack' ? 'Install modpack' : m.file.kind === 'skin' ? 'Open in Skins' : 'Add to instance'}</button>`}</div>`
+        : m.share
         ? `<div class="share-card"><span class="inst-icon">${Pixels.block(m.share.icon, 36)}</span><div><b>${esc(m.share.name)}</b><small>Minecraft ${esc(m.share.mcVersion)} · ${esc(LOADER_NAME[m.share.loader] || m.share.loader)} · ${m.share.mods.length} mods</small></div>
            ${m.me ? '' : `<button class="btn btn-primary" data-addshare="${i}">Add to my launcher</button>`}</div>`
         : esc(m.text);
@@ -545,9 +702,13 @@
     if (act === 'voice') startCall(u, false);
     else if (act === 'video') startCall(u, true);
     else if (act === 'share') openShare(u);
+    else if (act === 'sendfile') pickAndSend(u);
     else if (act === 'more') $('#chat-menu').classList.toggle('hidden');
     else if (act === 'remove') { if (confirm(`Remove ${nameOf(u)} from your friends?`)) removeFriend(u, false); }
     else if (act === 'block') { if (confirm(`Block ${nameOf(u)}? They won't be able to message, call or friend you.`)) removeFriend(u, true); }
+    const af = e.target.closest('[data-addfile]');
+    if (af) addReceivedFile(S.data.messages[u][+af.dataset.addfile].file, af);
+    if (e.target.closest('[data-act=profile]')) window.dispatchEvent(new CustomEvent('open-profile', { detail: u }));
     const add = e.target.closest('[data-addshare]');
     if (add) addSharedInstance(S.data.messages[u][+add.dataset.addshare].share, add);
   });
@@ -572,6 +733,16 @@
     };
   }
 
+  async function pickAndSend(u) {
+    const kinds = ['mod', 'resourcepack', 'datapack', 'shader', 'modpack'];
+    const ans = prompt('What are you sending?\n1. Mod (.jar)\n2. Resource pack (.zip)\n3. Data pack (.zip)\n4. Shader (.zip)\n5. Modpack (.mrpack / .zip)', '1');
+    if (ans === null) return;
+    const kind = kinds[(parseInt(ans, 10) || 1) - 1] || 'mod';
+    const file = await lab.pickFile({ title: 'Send a file privately', exts: kind === 'mod' ? ['jar'] : kind === 'modpack' ? ['mrpack', 'zip'] : ['zip'] });
+    if (!file) return;
+    toast(`Sending to ${nameOf(u)}…`);
+    try { await sendFile(u, file, kind); toast('Sent! 📎', 'ok'); } catch (e) { toast(errMsg(e), 'err'); }
+  }
   function openChat(u) { S.active = u; showFriends(); }
   function showFriends() {
     showView('friends');
@@ -599,7 +770,8 @@
     S.me = await lab.social.me();
     if (!S.me) return;
     S.data = (await lab.social.load()) || {};
-    S.data.friends ||= {}; S.data.messages ||= {}; S.data.unread ||= {};
+    S.data.friends ||= {}; S.data.messages ||= {}; S.data.unread ||= {}; S.data.profiles ||= {}; S.data.posts ||= []; S.data.feed ||= {};
+    myProfile();
     renderMe(); renderBadge();
     connectPeer();
     clearInterval(S.timer);
@@ -614,5 +786,11 @@
   const friendsList = () => S.data ? friends().filter(f => f.state === 'friend').sort((a, b) => a.name.localeCompare(b.name)) : [];
   const sendShare = (u, share) => { if (rel(u) === 'friend') sendMessage(u, { share: cleanShare(share) }); };
   const sendText = (u, text) => { if (rel(u) === 'friend') sendMessage(u, { text: String(text).slice(0, 2000) }); };
-  window.Social = { start, stop, close: closeFriends, renderMe, openChat, friendsList, sendText, sendShare };
+  window.Social = { start, stop, close: closeFriends, renderMe, openChat, friendsList, sendText, sendShare, sendFile, nameOf, realName,
+    profile: () => S.data ? myProfile() : null,
+    saveProfile: p => { Object.assign(myProfile(), p); save(); for (const f of friends()) if (f.state === 'friend' && ready(f.uuid)) { S.conns[f.uuid].send({ t: 'profile', profile: profileOut() }); if (p.visibility === 'friends') S.conns[f.uuid].send({ t: 'posts-index', posts: myPostsIndex() }); } changed(); },
+    friendProfile: u => S.data?.profiles[u] || null,
+    myPosts: () => (S.data?.posts || []).slice().reverse(),
+    feed: () => S.data ? [...Object.values(S.data.feed), ...(S.data.posts || []).map(p => ({ ...p, author: S.me.uuid, mine: true, likes: (p.likes || []).length }))].sort((a, b) => b.ts - a.ts) : [],
+    me: () => S.me, createPost, deletePost, likePost, editPost, isOnline: u => ready(u) };
 })();

@@ -15,7 +15,7 @@
     shader: ['cartoon', 'cursed', 'fantasy', 'realistic', 'semi-realistic', 'vanilla-like', 'atmosphere', 'bloom', 'shadows', 'reflections'],
   };
   const LOADERS = { mod: ['fabric', 'quilt', 'forge', 'neoforge'], modpack: ['fabric', 'quilt', 'forge', 'neoforge'], resourcepack: ['minecraft'], datapack: ['datapack'], shader: ['iris', 'optifine'] };
-  const P = { kind: null, ready: null, makerMods: [], cats: new Set(), done: null };
+  const P = { kind: null, ready: null, makerMods: [], cats: new Set(), done: null, visibility: 'approved', preInst: null };
   const slugify = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 64);
 
   async function open() {
@@ -41,7 +41,7 @@
     let pick = '';
     if (k === 'modpack') {
       pick = state.instances.length
-        ? `<label class="field"><span>Which instance?</span><select id="pb-inst">${state.instances.map(i => `<option value="${esc(i.id)}">${esc(i.name)} (${esc(i.mcVersion)} ${LOADER_NAME[i.loader]}, ${(i.mods || []).length} files)</option>`).join('')}</select></label>
+        ? `<label class="field"><span>Which instance?</span><select id="pb-inst">${state.instances.map(i => `<option value="${esc(i.id)}" ${i.id === P.preInst ? 'selected' : ''}>${esc(i.name)} (${esc(i.mcVersion)} ${LOADER_NAME[i.loader]}, ${(i.mods || []).length} files)</option>`).join('')}</select></label>
            <p class="fine">Mods that are on Modrinth get linked, so your pack stays small. Your config files come along too.</p>`
         : '<p class="muted">Make an instance first, then you can turn it into a modpack.</p>';
     } else {
@@ -97,15 +97,18 @@
       </div>
       <div class="srv-card"><b class="lbl">4. Share it</b>
         <div class="share-opts">
+          <div class="srv-box"><b>🔒 Send privately to a friend</b><p class="fine">Only that friend gets it, straight from your computer to theirs. Nothing is posted online (up to 40 MB).</p>
+            ${(Social.friendsList?.() || []).length ? `<div class="row"><select id="pd-friend">${Social.friendsList().map(f => `<option value="${f.uuid}" ${Social.isOnline(f.uuid) ? '' : 'disabled'}>${esc(Social.nameOf(f.uuid))}${Social.isOnline(f.uuid) ? '' : ' (offline)'}</option>`).join('')}</select><button class="btn btn-ghost" id="pd-send">Send</button></div>` : '<p class="fine">Add friends first (Friends tab).</p>'}</div>
           <div class="srv-box"><b>💾 Save the file</b><p class="fine">Send it to friends, post it on Discord, or upload it anywhere.</p><button class="btn btn-ghost" id="pd-save">Save file</button></div>
           <div class="srv-box"><b>🚀 Publish on Modrinth</b>
             ${hasToken ? '<p class="fine">✓ Your Modrinth account is connected.</p>' : `<p class="fine">Make a free account at <a href="#" data-url="https://modrinth.com">modrinth.com</a>, then create a <a href="#" data-url="https://modrinth.com/settings/pats">personal access token</a> with <b>Create projects</b>, <b>Create versions</b> and <b>Write projects</b> ticked. Paste it here:</p>
               <div class="row"><input id="pd-token" type="password" placeholder="mrp_…"><button class="btn btn-ghost" id="pd-token-save">Connect</button></div>`}
+            <div class="vis">${[['approved', '🌍 Public', 'Anyone can find it in search'], ['unlisted', '🔗 Unlisted', 'Only people with the link'], ['private', '🔒 Private', 'Only you (and people you add on Modrinth)']].map(([v, t, d]) => `<label class="check"><input type="radio" name="pvis" value="${v}" ${P.visibility === v ? 'checked' : ''}> <b>${t}</b> <small>${d}</small></label>`).join('')}</div>
             <button class="btn btn-play" id="pd-modrinth" ${hasToken ? '' : 'disabled'}>Publish</button>
           </div>
           <div class="srv-box"><b>🔥 CurseForge</b><p class="fine">CurseForge only lets you create new projects on its website. Save the file, then upload it there.</p><button class="btn btn-ghost" data-url="https://authors.curseforge.com/#/projects/create">Open CurseForge</button></div>
         </div>
-        ${P.done ? `<div class="pub-done">🎉 <b>Uploaded!</b> Your project is a <b>draft</b> for now. <a href="#" data-url="${esc(P.done.url)}">Open it on Modrinth</a>, check it looks good, then click <b>Submit for review</b>. Modrinth's team checks new projects, usually within a few days, and then anyone can find it.</div>` : ''}
+        ${P.done ? `<div class="pub-done">🎉 <b>Uploaded!</b> Your project is a <b>draft</b> for now. <a href="#" data-url="${esc(P.done.url)}">Open it on Modrinth</a>, check it looks good, then click <b>Submit for review</b>. Modrinth's team checks new projects, usually within a few days. After that it becomes ${P.visibility === 'approved' ? '<b>public</b>, so anyone can find it' : P.visibility === 'unlisted' ? '<b>unlisted</b>, so only people with the link can see it' : '<b>private</b>, so only you can see it'}.</div>` : ''}
       </div>`;
     $('#pd-cats').onclick = e => {
       const c = e.target.closest('[data-cat]'); if (!c) return;
@@ -120,6 +123,14 @@
       await lab.publish.token(t); toast('Modrinth connected', 'ok'); step3();
     });
     $('#pd-modrinth').onclick = publish;
+    $$('input[name=pvis]').forEach(r => r.onchange = () => { P.visibility = r.value; });
+    $('#pd-send') && ($('#pd-send').onclick = async () => {
+      const u = $('#pd-friend').value; if (!u) return;
+      const b = $('#pd-send'); b.disabled = true; b.textContent = 'Sending…';
+      try { await Social.sendFile(u, r.file, k); toast(`Sent privately to ${Social.nameOf(u)}! 🔒`, 'ok'); }
+      catch (e) { toast(errMsg(e), 'err'); }
+      b.disabled = false; b.textContent = 'Send';
+    });
   }
   async function publish() {
     const title = $('#pd-title').value.trim(), summary = $('#pd-sum').value.trim(), version = $('#pd-ver').value.trim() || '1.0.0';
@@ -129,14 +140,14 @@
     if (summary.length < 3) return toast('Write a short summary.', 'err');
     if (!mcVersions.length) return toast('Add at least one Minecraft version, like 1.21.1', 'err');
     if (!loaders.length) return toast('Tick what it works with.', 'err');
-    if (!confirm(`Upload "${title}" to Modrinth? Only upload things you made yourself, or that you have permission to share.`)) return;
+    if (!confirm(`Upload "${title}" to Modrinth as ${P.visibility === 'approved' ? 'PUBLIC' : P.visibility === 'unlisted' ? 'UNLISTED' : 'PRIVATE'}? Only upload things you made yourself, or that you have permission to share.`)) return;
     const b = $('#pd-modrinth'); b.disabled = true; b.textContent = 'Uploading…';
     try {
-      P.done = await lab.publish.modrinth({ kind: P.kind, file: P.ready.file, title, slug: slugify(title), summary, body: $('#pd-body').value.trim(), categories: [...P.cats], mcVersions, loaders, version, iconDataUrl: P.icon || '' });
+      P.done = await lab.publish.modrinth({ kind: P.kind, file: P.ready.file, title, slug: slugify(title), summary, body: $('#pd-body').value.trim(), categories: [...P.cats], mcVersions, loaders, version, iconDataUrl: P.icon || '', visibility: P.visibility });
       Notes.add({ kind: 'mod', title: `Uploaded ${title} to Modrinth`, body: 'Open it and click Submit for review.' });
       step3();
     } catch (e) { toast(errMsg(e), 'err'); b.disabled = false; b.textContent = 'Publish'; }
   }
 
-  window.Publish = { open };
+  window.Publish = { open, start: async (kind, instanceId) => { P.kind = kind; P.preInst = instanceId || null; P.ready = null; P.done = null; P.cats = new Set(); await open(); } };
 })();

@@ -75,7 +75,7 @@
         <div class="srv-card">
           <b>Mod icon</b><p class="fine">Draw a 16×16 pixel icon. It shows in mod lists like Mod Menu.</p>
           <canvas id="px" width="256" height="256"></canvas>
-          <div class="palette">${PALETTE.map(c => `<button data-c="${c}" class="${c === M.color ? 'sel' : ''}" style="${c ? `background:${c}` : ''}" title="${c || 'Eraser'}">${c ? '' : '⌫'}</button>`).join('')}<button class="btn btn-ghost" id="px-clear">Clear</button></div>
+          <div class="palette">${PALETTE.map(c => `<button data-c="${c}" class="${c === M.color ? 'sel' : ''}" style="${c ? `background:${c}` : ''}" title="${c || 'Eraser'}">${c ? '' : '⌫'}</button>`).join('')}${ColorPicker.swatch('px-rgb', M.color || '#8b2cff')}<button class="btn btn-ghost" id="px-clear">Clear</button></div>
         </div>
       </div>`;
     const bind = (id, key) => { $(id).oninput = e => { m[key] = e.target.value; save(); if (key === 'name') document.querySelector(`[data-mod="${m.uid}"]`)?.lastChild && (document.querySelector(`[data-mod="${m.uid}"]`).lastChild.textContent = m.name); }; };
@@ -113,6 +113,7 @@
     cv.onpointermove = e => painting && paint(e);
     cv.onpointerup = () => { painting = false; exportIcon(); save(); };
     $('.palette').onclick = e => { const b = e.target.closest('[data-c]'); if (!b) return; M.color = b.dataset.c; $$('.palette [data-c]').forEach(x => x.classList.toggle('sel', x === b)); };
+    ColorPicker.bind($('#px-rgb'), () => M.color || '#8b2cff', h => { M.color = h; $$('.palette [data-c]').forEach(x => x.classList.remove('sel')); });
     $('#px-clear').onclick = () => { m.pixels = Array(256).fill(''); draw(); exportIcon(); save(); };
     draw();
   }
@@ -175,9 +176,13 @@
       else if (e.target.type === 'checkbox') it[f] = e.target.checked;
       else if (['count', 'damage'].includes(f)) it[f] = +e.target.value;
       else { it[f] = e.target.value; if (f === 'displayName') { it.name = e.target.value || 'item'; card.querySelector('.it-preview').textContent = e.target.value || '(no name)'; } }
-      if (f === 'color') card.querySelector('.it-preview').style.color = COLORS[it.color];
+      if (f === 'color') card.querySelector('.it-preview').style.color = /^#/.test(it.color) ? it.color : COLORS[it.color];
       save();
     };
+    m.items.forEach((it, i) => ColorPicker.bind($('#it-rgb-' + i), () => /^#/.test(it.color) ? it.color : COLORS[it.color] || '#ffffff', h => {
+      it.color = h; const card = $(`[data-item="${i}"]`); card.querySelector('.it-preview').style.color = h;
+      const sel = card.querySelector('[data-f=color]'); let o = [...sel.options].find(x => x.value.startsWith('#')); if (!o) { o = document.createElement('option'); sel.append(o); } o.value = h; o.textContent = 'custom ' + h; sel.value = h; save();
+    }));
     list.onclick = e => {
       const card = e.target.closest('[data-item]'); if (!card) return;
       const it = m.items[+card.dataset.item];
@@ -188,7 +193,7 @@
   }
   function itemCard(it, i) {
     return `<div class="srv-card mm-item" data-item="${i}">
-      <div class="mm-item-top"><span class="it-preview" style="color:${COLORS[it.color] || '#fff'}">${esc(it.displayName || '(no name)')}</span><button class="btn btn-ghost danger" data-act="del">Remove</button></div>
+      <div class="mm-item-top"><span class="it-preview" style="color:${/^#/.test(it.color) ? it.color : COLORS[it.color] || '#fff'}">${esc(it.displayName || '(no name)')}</span><button class="btn btn-ghost danger" data-act="del">Remove</button></div>
       <div class="mm-item-grid">
         <div>
           <b class="lbl">Recipe</b>
@@ -197,7 +202,7 @@
         </div>
         <div>
           <div class="row2"><label class="field"><span>Name</span><input data-f="displayName" maxlength="40" value="${esc(it.displayName)}"></label>
-          <label class="field"><span>Color</span><select data-f="color">${Object.keys(COLORS).map(c => `<option value="${c}" ${c === it.color ? 'selected' : ''}>${c.replace('_', ' ')}</option>`).join('')}</select></label></div>
+          <label class="field"><span>Color</span><div class="row"><select data-f="color">${Object.keys(COLORS).map(c => `<option value="${c}" ${c === it.color ? 'selected' : ''}>${c.replace('_', ' ')}</option>`).join('')}${/^#/.test(it.color) ? `<option value="${esc(it.color)}" selected>custom ${esc(it.color)}</option>` : ''}</select>${ColorPicker.swatch('it-rgb-' + i, /^#/.test(it.color) ? it.color : COLORS[it.color] || '#ffffff')}</div></label></div>
           <div class="row2"><label class="field"><span>Based on</span><input list="mm-items" data-f="base" value="${esc(it.base)}"></label>
           <label class="field sm"><span>Makes</span><input type="number" min="1" max="64" data-f="count" value="${it.count}"></label></div>
           <label class="field"><span>Description line</span><input data-f="lore" maxlength="80" value="${esc(it.lore || '')}"></label>
