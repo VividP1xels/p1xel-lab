@@ -22,9 +22,9 @@ document.addEventListener('click', e => {
   const yt = e.target.closest('[data-yt]'); if (yt) { e.preventDefault(); lab.openExternal(YT); }
   const u = e.target.closest('[data-url]'); if (u) { e.preventDefault(); lab.openExternal(u.dataset.url); }
 });
-$('#login-logo').innerHTML = Pixels.flask(96);
-$('#side-logo').innerHTML = Pixels.flask(28);
-$('#upd-logo').innerHTML = Pixels.flask(64);
+$('#login-logo').innerHTML = Pixels.logo(96);
+$('#side-logo').innerHTML = Pixels.logo(28);
+$('#upd-logo').innerHTML = Pixels.logo(64);
 
 // ---------- 1. sign in ----------
 $('#btn-login').onclick = async () => {
@@ -56,7 +56,7 @@ async function onSignedIn(user) {
 // ---------- 2. tutorial ----------
 const TUT = [
   { title: 'Welcome to the Lab', body: `<p>P1xel Lab is a Minecraft launcher built for modding. In under a minute you'll know how to add any mod you want — no dragging files around folders.</p><ul><li>Search <b>Modrinth</b> and <b>CurseForge</b> right inside the launcher</li><li>One-click installs that grab the right version automatically</li><li>Keep different modpacks apart with instances</li></ul>`,
-    mock: () => `<div style="text-align:center;padding:20px 0">${Pixels.flask(120)}<div class="logo" style="font-size:30px;margin-top:12px">P1xel <span>Lab</span></div><p class="muted" style="margin:0">by VividP1xels</p></div>` },
+    mock: () => `<div style="text-align:center;padding:20px 0">${Pixels.logo(120)}<div class="logo" style="font-size:30px;margin-top:12px">P1xel <span>Lab</span></div><p class="muted" style="margin:0">by VividP1xels</p></div>` },
   { title: 'Instances keep things tidy', body: `<p>An <b>instance</b> is a separate copy of Minecraft. Each one has its own mods, worlds, resource packs and settings.</p><ul><li>Make one for a tech modpack, another for survival, another for vanilla</li><li>Mods in one instance never break another</li></ul>`,
     mock: () => `<div class="mock">${[['grass', 'Survival+', '1.21.1 · Fabric · 14 mods'], ['diamond', 'Tech Lab', '1.20.1 · Fabric · 52 mods'], ['stone', 'Vanilla', '1.21.4 · Vanilla']].map(([i, n, s]) => `<div class="mrow"><span class="inst-icon">${Pixels.block(i, 28)}</span><div><b>${n}</b><small>${s}</small></div></div>`).join('')}</div>` },
   { title: 'Pick a mod loader', body: `<p>Mods are built for a specific <b>loader</b>. A Fabric mod only runs on Fabric (or Quilt).</p><ul><li><b>Fabric</b> — the most popular choice for new versions (Sodium, Iris, Lithium…)</li><li><b>Quilt</b> — a Fabric fork that runs most Fabric mods</li></ul><p>You pick the loader once when you make the instance. P1xel Lab installs it for you.</p>`,
@@ -230,7 +230,7 @@ function renderResults() {
     <div class="mod">
       ${h.icon ? `<img src="${esc(h.icon)}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
       <div class="body">
-        <h4 data-url="${esc(h.url)}" title="Open project page">${esc(h.title)}</h4>
+        <h4 data-detail="${idx}" title="See details">${esc(h.title)}</h4>
         <span class="by">by ${esc(h.author)} · ⬇ ${fmt(h.downloads)}</span>
         <div class="desc">${esc(h.description)}</div>
         <div class="foot">${h.categories.map(c => `<span class="cat">${esc(c)}</span>`).join('')}
@@ -240,7 +240,23 @@ function renderResults() {
     </div>`).join('');
   $('#m-more').classList.toggle('hidden', state.offset >= state.total);
 }
+function showModDetails(h) {
+  const installed = isInstalled(h);
+  $('#md-body').innerHTML = `
+    <div class="md-top">${h.icon ? `<img src="${esc(h.icon)}" alt="">` : '<div class="noimg"></div>'}
+      <div><h3>${esc(h.title)}</h3><span class="by">by ${esc(h.author)} · ⬇ ${fmt(h.downloads)} downloads · from ${h.source === 'modrinth' ? 'Modrinth' : 'CurseForge'}</span>
+      <div class="foot">${h.categories.map(c => `<span class="cat">${esc(c)}</span>`).join('')}</div></div></div>
+    <p class="md-desc">${esc(h.description)}</p>
+    <p class="fine">Works with Minecraft ${esc(state.current.mcVersion)} + ${LOADER_NAME[state.current.loader]}.</p>`;
+  $('#md-web').dataset.url = h.url;
+  const go = $('#md-install');
+  go.disabled = installed || state.offline;
+  go.textContent = installed ? '✓ Installed' : state.offline ? 'Needs internet' : 'Install';
+  go.onclick = () => { $('#mod-dlg').close(); $(`#results [data-install="${state.results.indexOf(h)}"]`)?.click(); };
+  $('#mod-dlg').showModal();
+}
 $('#results').onclick = async e => {
+  const d = e.target.closest('[data-detail]'); if (d) return showModDetails(state.results[+d.dataset.detail]);
   const b = e.target.closest('[data-install]'); if (!b) return;
   const h = state.results[+b.dataset.install];
   b.disabled = true; b.textContent = 'Installing…';
@@ -255,7 +271,11 @@ $('#results').onclick = async e => {
 };
 lab.onModProgress(p => {
   const b = $('#results [data-install][disabled]');
-  if (b && p) b.textContent = p.pct ? `${Math.round(p.pct * 100)}%` : 'Installing…';
+  if (!b || !p) return;
+  if (p.stage === 'curseforge-page') {
+    b.textContent = 'Finish in CurseForge window…';
+    toast(`${p.title} can only be downloaded from CurseForge's page. It opened in a small window — the file goes straight into your instance when it downloads.`);
+  } else b.textContent = p.pct ? `${Math.round(p.pct * 100)}%` : 'Installing…';
 });
 
 function renderInstalled() {

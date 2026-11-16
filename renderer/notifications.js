@@ -41,7 +41,7 @@
         <div class="n-txt"><b>${esc(n.title)}</b>${n.body ? `<small>${esc(n.body)}</small>` : ''}<i>${ago(n.ts)}</i></div>
         <button class="n-x" data-dismiss="${n.id}" title="Dismiss">✕</button>
       </div>`).join('')
-      : `<div class="notif-empty">${Pixels.flask(48)}<p>You're all caught up!</p></div>`;
+      : `<div class="notif-empty">${Pixels.logo(48)}<p>You're all caught up!</p></div>`;
   }
   function open() { $('#notif-panel').classList.remove('hidden'); render(); }
   function close() { $('#notif-panel').classList.add('hidden'); }

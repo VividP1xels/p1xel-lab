@@ -473,7 +473,7 @@
     const u = S.active;
     const pane = $('#f-chat');
     if (!u || rel(u) !== 'friend') {
-      pane.innerHTML = `<div class="chat-empty">${Pixels.flask(72)}<h3 class="pix">Pick a friend to chat</h3><p class="muted">Send messages, start voice or video calls, and share your modded instances.</p></div>`;
+      pane.innerHTML = `<div class="chat-empty">${Pixels.logo(72)}<h3 class="pix">Pick a friend to chat</h3><p class="muted">Send messages, start voice or video calls, and share your modded instances.</p></div>`;
       return;
     }
     pane.innerHTML = `

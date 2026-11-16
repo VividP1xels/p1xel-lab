@@ -386,16 +386,21 @@ async function installCurseforge(inst, modId, seen = new Set()) {
   ]);
   if (!files.length) throw new Error(`No file for Minecraft ${inst.mcVersion} (${inst.loader}).`);
   const f = files.find(x => x.releaseType === 1) || files[0];
-  let url = f.downloadUrl;
-  if (!url) {
-    // Author disabled third-party downloads — open the page so the user can grab it manually.
-    shell.openExternal(`${mod.links?.websiteUrl || 'https://www.curseforge.com'}/files/${f.id}`);
-    throw new Error(`${mod.name}'s author only allows downloads from the CurseForge website. We opened the page for you — drop the file into the instance's mods folder.`);
+  let entry;
+  if (f.downloadUrl) {
+    send('mods:progress', { title: mod.name, stage: 'downloading' });
+    await download(f.downloadUrl, path.join(instDir(inst.id), 'mods', path.basename(f.fileName)), x => send('mods:progress', { title: mod.name, stage: 'downloading', pct: x }));
+    entry = { source: 'curseforge', projectId: String(modId), title: mod.name, icon: mod.logo?.thumbnailUrl || '', version: f.displayName, file: path.basename(f.fileName) };
+    inst.mods.push(entry);
+  } else {
+    // The author only allows downloads from CurseForge's website.
+    // 1) Same mod on Modrinth? Install it from there, no website needed.
+    const viaModrinth = await curseforgeOnModrinth(inst, mod, f, seen);
+    if (viaModrinth) return viaModrinth;
+    // 2) Otherwise download it from the CurseForge page inside the launcher and drop it in the mods folder for you.
+    entry = await downloadFromCurseforgePage(inst, mod, f);
+    inst.mods.push(entry);
   }
-  send('mods:progress', { title: mod.name, stage: 'downloading' });
-  await download(url, path.join(instDir(inst.id), 'mods', f.fileName), x => send('mods:progress', { title: mod.name, stage: 'downloading', pct: x }));
-  const entry = { source: 'curseforge', projectId: String(modId), title: mod.name, icon: mod.logo?.thumbnailUrl || '', version: f.displayName, file: f.fileName };
-  inst.mods.push(entry);
   const installed = [entry];
   for (const dep of f.dependencies || []) {
     if (dep.relationType === 3) { // required
@@ -403,6 +408,62 @@ async function installCurseforge(inst, modId, seen = new Set()) {
     }
   }
   return installed;
+}
+// Find the exact same file on Modrinth (by its SHA-1), or the same project by name.
+async function curseforgeOnModrinth(inst, mod, f, seen) {
+  try {
+    const sha1 = (f.hashes || []).find(h => h.algo === 1)?.value;
+    if (sha1) {
+      const r = await fetch(`https://api.modrinth.com/v2/version_file/${sha1}?algorithm=sha1`, { headers: { 'User-Agent': UA } });
+      if (r.ok) { const v = await r.json(); return await installModrinth(inst, v.project_id, seen); }
+    }
+    const r = await fetch(`https://api.modrinth.com/v2/project/${encodeURIComponent(mod.slug)}`, { headers: { 'User-Agent': UA } });
+    if (r.ok) {
+      const p = await r.json();
+      const norm = t => String(t).toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (p.project_type === 'mod' && norm(p.title) === norm(mod.name)) return await installModrinth(inst, p.id, seen);
+    }
+  } catch (e) { console.warn('Modrinth fallback failed:', e.message); }
+  return null;
+}
+// Open CurseForge's own download page in a small launcher window and catch the file it downloads.
+let cfQueue = Promise.resolve();
+function downloadFromCurseforgePage(inst, mod, f) {
+  const job = cfQueue.then(() => new Promise((resolve, reject) => {
+    const modsDir = path.join(instDir(inst.id), 'mods');
+    const page = `${mod.links?.websiteUrl || `https://www.curseforge.com/minecraft/mc-mods/${mod.slug}`}/download/${f.id}`;
+    const dl = new BrowserWindow({
+      parent: win, width: 980, height: 720, autoHideMenuBar: true, backgroundColor: '#0d0b14',
+      title: `Downloading ${mod.name} from CurseForge — P1xel Lab`,
+      webPreferences: { partition: 'persist:curseforge', contextIsolation: true, sandbox: true },
+    });
+    let finished = false;
+    const ses = dl.webContents.session;
+    send('mods:progress', { title: mod.name, stage: 'curseforge-page' });
+    const onDownload = (_e, item, wc) => {
+      if (wc && wc !== dl.webContents && wc.hostWebContents !== dl.webContents) return;
+      const name = path.basename(item.getFilename());
+      if (!/\.jar$/i.test(name)) return; // ignore anything that isn't a mod
+      item.setSavePath(path.join(modsDir, name));
+      item.on('updated', () => { const t = item.getTotalBytes(); if (t) send('mods:progress', { title: mod.name, stage: 'downloading', pct: item.getReceivedBytes() / t }); });
+      item.once('done', (_e2, st) => {
+        if (st !== 'completed') return;
+        finished = true;
+        ses.removeListener('will-download', onDownload);
+        if (!dl.isDestroyed()) dl.close();
+        resolve({ source: 'curseforge', projectId: String(mod.id), title: mod.name, icon: mod.logo?.thumbnailUrl || '', version: f.displayName, file: name });
+      });
+    };
+    ses.on('will-download', onDownload);
+    dl.webContents.setWindowOpenHandler(({ url }) => { dl.loadURL(url); return { action: 'deny' }; });
+    dl.on('closed', () => {
+      ses.removeListener('will-download', onDownload);
+      if (!finished) reject(new Error(`Download of ${mod.name} was cancelled.`));
+    });
+    dl.loadURL(page);
+  }));
+  cfQueue = job.catch(() => {});
+  return job;
 }
 ipcMain.handle('mods:install', async (_e, { instanceId, source, projectId }) => {
   const inst = await readInstance(instanceId);

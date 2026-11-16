@@ -251,3 +251,9 @@ small.online { color: var(--green) !important; } small.playing { color: #c89aff 
 .ver { margin-right: auto; align-self: center; }
 .brand .logo.sm { white-space: nowrap; font-size: 18px; }
 .update-btn { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.md-top { display: flex; gap: 14px; align-items: flex-start; }
+.md-top img, .md-top .noimg { width: 72px; height: 72px; border-radius: 8px; flex: none; background: var(--panel2); object-fit: cover; }
+.md-top h3 { margin: 0 0 2px; font-size: 20px; } .md-top .by { color: var(--muted); font-size: 12px; }
+.md-top .foot { display: flex; gap: 6px; margin-top: 8px; } .md-top .cat { background: var(--panel2); padding: 1px 7px; border-radius: 3px; font-size: 12px; color: var(--muted); }
+.md-desc { color: #cfc9ea; margin: 16px 0 6px; }
+#mod-dlg { width: min(560px, 92vw); }
