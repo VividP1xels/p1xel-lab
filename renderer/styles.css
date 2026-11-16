@@ -222,3 +222,32 @@ small.online { color: var(--green) !important; } small.playing { color: #c89aff 
 .call-btns { position: absolute; bottom: 18px; left: 0; right: 0; display: flex; justify-content: center; gap: 10px; }
 .cbtn { border: 2px solid #000; border-radius: 24px; padding: 10px 18px; font: 600 14px Inter, sans-serif; cursor: pointer; background: var(--panel2); color: var(--text); box-shadow: var(--shadow); }
 .cbtn.off { background: #5a2a3a; } .cbtn.green { background: var(--green); color: #04220f; } .cbtn.red { background: var(--red); color: #fff; }
+
+/* ---------- notifications + updates ---------- */
+.brand { position: relative; }
+.bell { margin-left: auto; position: relative; background: var(--panel2); border: 1px solid var(--line); color: var(--text); width: 34px; height: 34px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.bell:hover { border-color: var(--purple); }
+.bell.ring svg { animation: ring 2.4s ease-in-out infinite; transform-origin: 50% 10%; }
+@keyframes ring { 0%, 80%, 100% { transform: rotate(0); } 84% { transform: rotate(14deg); } 88% { transform: rotate(-12deg); } 92% { transform: rotate(8deg); } 96% { transform: rotate(-4deg); } }
+.bell .badge { position: absolute; top: -7px; right: -7px; margin: 0; min-width: 18px; height: 18px; font-size: 10px; border: 2px solid var(--panel); }
+.update-btn { width: 100%; margin-top: 12px; padding: 10px; border: 2px solid #000; border-radius: 6px; cursor: pointer; font: 700 13px Silkscreen, monospace; letter-spacing: .5px; color: #04220f;
+  background: linear-gradient(90deg, #5cf08f, var(--cyan), #5cf08f); background-size: 200% 100%; animation: shine 2.5s linear infinite, glow 1.6s ease-in-out infinite; box-shadow: 0 3px 0 #07050c; }
+.update-btn:hover { filter: brightness(1.1); }
+@keyframes shine { to { background-position: -200% 0; } }
+@keyframes glow { 50% { box-shadow: 0 3px 0 #07050c, 0 0 18px #36f0e077; } }
+.notif-panel { position: fixed; left: 240px; top: 12px; width: 360px; max-height: calc(100vh - 24px); display: flex; flex-direction: column; background: var(--panel); border: 2px solid var(--line); border-radius: 8px; box-shadow: 0 8px 0 #07050c, 0 10px 40px #000a; z-index: 40; animation: in .15s; }
+.notif-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 2px solid var(--line); }
+.notif-head b { flex: 1; font-size: 15px; } .notif-head .link { font-size: 12px; }
+.notif-list { overflow: auto; padding: 6px; }
+.notif { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border-radius: 6px; cursor: pointer; position: relative; }
+.notif:hover { background: var(--panel2); }
+.notif.unread { background: #a24bff14; } .notif.unread::before { content: ''; position: absolute; left: 2px; top: 16px; width: 5px; height: 5px; background: var(--purple); }
+.n-ico { font-size: 18px; width: 30px; height: 30px; flex: none; display: flex; align-items: center; justify-content: center; background: var(--panel2); border-radius: 6px; }
+.n-txt { flex: 1; min-width: 0; } .n-txt b { display: block; font-weight: 600; font-size: 13px; } .n-txt small { display: block; color: #cfc9ea; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .n-txt i { font-style: normal; color: var(--muted); font-size: 11px; }
+.n-x { background: none; border: 0; color: var(--muted); cursor: pointer; opacity: 0; } .notif:hover .n-x { opacity: 1; }
+.notif-empty { text-align: center; padding: 30px; color: var(--muted); }
+.upd-top { display: flex; gap: 16px; align-items: center; } .upd-top h3 { margin: 0; font-size: 22px; } .upd-top p { margin: 4px 0 0; }
+.upd-notes { background: var(--bg); border: 2px solid var(--line); border-radius: 6px; padding: 12px; margin: 14px 0 10px; max-height: 200px; overflow: auto; white-space: pre-wrap; font-size: 13px; color: #cfc9ea; }
+.ver { margin-right: auto; align-self: center; }
+.brand .logo.sm { white-space: nowrap; font-size: 18px; }
+.update-btn { display: flex; align-items: center; justify-content: center; gap: 8px; }

@@ -17,11 +17,16 @@ jobs:
         with:
           node-version: 22
       - run: npm install
+      # Every build gets a new version (1.0.<build number>) so launchers can spot the update
+      - run: npm version 1.0.${{ github.run_number }} --no-git-tag-version --allow-same-version
       - run: npx electron-builder --win nsis portable --x64 --publish never
-      - name: Publish download page
+      - name: Publish release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          VERSION=1.0.${{ github.run_number }}
+          git log -1 --format=%B | grep -v -E '^(Co-Authored-By|Claude-Session):' > notes.txt
+          printf '\n---\nDownload **P1xel-Lab-Setup.exe** to install, or **P1xel-Lab-Portable.exe** to run without installing.\n' >> notes.txt
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest dist/*.exe --title "P1xel Lab (latest build)" --notes "Download **P1xel Lab Setup 1.0.0.exe** to install, or **P1xel Lab 1.0.0.exe** to run without installing."
+          gh release create "v$VERSION" dist/P1xel-Lab-Setup.exe dist/P1xel-Lab-Portable.exe --title "P1xel Lab v$VERSION" --notes-file notes.txt --latest

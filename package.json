@@ -39,7 +39,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "P1xel-Lab-Setup.${ext}"
     },
     "mac": {
       "target": "dmg",
@@ -48,6 +49,9 @@
     "linux": {
       "target": "AppImage",
       "category": "Game"
+    },
+    "portable": {
+      "artifactName": "P1xel-Lab-Portable.${ext}"
     }
   }
 }

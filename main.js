@@ -557,3 +557,35 @@ ipcMain.handle('social:playing', () => playing);
 const socialFile = () => path.join(DATA(), `friends-${(currentUser?.uuid || 'none').replace(/-/g, '')}.json`);
 ipcMain.handle('social:load', () => { try { return JSON.parse(fs.readFileSync(socialFile(), 'utf8')); } catch { return null; } });
 ipcMain.handle('social:save', (_e, data) => { fs.writeFileSync(socialFile(), JSON.stringify(data)); return true; });
+
+// ---------- updates (from the GitHub releases page) ----------
+const REPO = 'VividP1xels/p1xel-lab';
+const newer = (a, b) => {
+  const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  return false;
+};
+let latestRelease = null;
+ipcMain.handle('update:check', async () => {
+  const current = app.getVersion();
+  const r = await getJSON(`https://api.github.com/repos/${REPO}/releases/latest`, { Accept: 'application/vnd.github+json' });
+  const version = String(r.tag_name || '').replace(/^v/, '');
+  if (!/^\d+\.\d+\.\d+$/.test(version)) return { current, available: false };
+  const setup = r.assets.find(a => /setup.*\.exe$/i.test(a.name));
+  latestRelease = { version, setupUrl: setup?.browser_download_url, page: r.html_url };
+  return { current, available: newer(version, current), version, notes: String(r.body || '').slice(0, 2000), date: r.published_at, portable: !!process.env.PORTABLE_EXECUTABLE_FILE };
+});
+ipcMain.handle('update:install', async () => {
+  if (!latestRelease) throw new Error('Check for updates first.');
+  // Portable copy (or not Windows): just open the download page
+  if (process.platform !== 'win32' || process.env.PORTABLE_EXECUTABLE_FILE || !latestRelease.setupUrl) {
+    shell.openExternal(latestRelease.page);
+    return { opened: true };
+  }
+  const file = path.join(app.getPath('temp'), `P1xel-Lab-Setup-${latestRelease.version}.exe`);
+  await download(latestRelease.setupUrl, file, f => send('update:progress', f));
+  // Silent install, then the installer starts the new version for us
+  require('child_process').spawn(file, ['/S', '--force-run'], { detached: true, stdio: 'ignore' }).unref();
+  setTimeout(() => app.quit(), 800);
+  return { installing: true };
+});

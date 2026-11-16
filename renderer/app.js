@@ -24,6 +24,7 @@ document.addEventListener('click', e => {
 });
 $('#login-logo').innerHTML = Pixels.flask(96);
 $('#side-logo').innerHTML = Pixels.flask(28);
+$('#upd-logo').innerHTML = Pixels.flask(64);
 
 // ---------- 1. sign in ----------
 $('#btn-login').onclick = async () => {
@@ -45,6 +46,7 @@ async function onSignedIn(user) {
   state.settings = await lab.getSettings();
   state.instances = await lab.listInstances();
   Social.start();
+  Notes.start();
   if (user.offline) toast("You're offline. Showing your saved stuff until you reconnect.");
   if (!state.settings.tutorialDone) startTutorial();
   else if (!state.instances.length) openCreate(true);
@@ -247,6 +249,7 @@ $('#results').onclick = async e => {
     state.current = r.instance; updateCounts();
     const deps = r.added.slice(1).map(a => a.title);
     toast(r.added.length ? `Installed ${h.title}${deps.length ? ` + ${deps.join(', ')}` : ''}` : `${h.title} is already installed`, 'ok');
+    if (r.added.length) Notes.add({ kind: 'mod', title: `Installed ${h.title}`, body: `in ${state.current.name}${deps.length ? ` (+ ${deps.join(', ')})` : ''}`, action: { type: 'instance', id: state.current.id } });
     renderResults();
   } catch (err) { toast(errMsg(err), 'err'); b.disabled = false; b.textContent = 'Install'; }
 };
@@ -313,7 +316,11 @@ lab.onLaunchLog(({ id, line }) => {
 lab.onLaunchClosed(({ id, code }) => {
   launchState[id] = null;
   if (state.current?.id === id) setPlayState(null);
-  if (code && code !== 0) toast(`Minecraft closed with code ${code} — check the Game log tab.`, 'err');
+  if (code && code !== 0) {
+    toast(`Minecraft closed with code ${code} — check the Game log tab.`, 'err');
+    const inst = state.instances.find(i => i.id === id);
+    Notes.add({ kind: 'game', title: 'Minecraft crashed', body: `${inst?.name || 'Your instance'} closed with code ${code}. Open it and check the Game log.`, action: { type: 'instance', id } });
+  }
   lab.listInstances().then(l => { state.instances = l; renderSidebar(); });
 });
 

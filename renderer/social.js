@@ -174,11 +174,15 @@
           S.data.friends[u] = { uuid: u, name: c.__name, state: 'in', since: Date.now() }; save();
           notify(`${c.__name} wants to be friends`, 'Open Friends to accept.');
           toast(`👋 ${c.__name} sent you a friend request`);
+          Notes.add({ kind: 'friend', title: `${c.__name} sent you a friend request`, body: 'Open Friends to accept or decline.', action: { type: 'friends' }, group: 'req-' + u });
         }
         renderAll();
         return;
       case 'accept':
-        if (mine === 'out') { becomeFriends(u, c.__name); toast(`🎉 You and ${c.__name} are now friends`, 'ok'); }
+        if (mine === 'out') {
+          becomeFriends(u, c.__name); toast(`🎉 You and ${c.__name} are now friends`, 'ok');
+          Notes.add({ kind: 'friend', title: `${c.__name} accepted your friend request`, body: 'Say hi!', action: { type: 'chat', uuid: u } });
+        }
         return;
       case 'decline': case 'removed':
         if (mine && mine !== 'blocked') { delete S.data.friends[u]; save(); if (S.active === u) S.active = null; renderAll(); }
@@ -208,6 +212,11 @@
             S.data.unread[u] = (S.data.unread[u] || 0) + 1;
             notify(nameOf(u), msg.share ? `shared "${msg.share.name}" with you` : msg.text);
             if (!(S.open && S.active === u)) toast(`💬 ${nameOf(u)}: ${msg.share ? 'shared an instance' : msg.text.slice(0, 60)}`);
+            if (msg.share) Notes.add({ kind: 'share', title: `${nameOf(u)} shared "${msg.share.name}"`, body: `${msg.share.mods.length} mods · Minecraft ${msg.share.mcVersion}`, action: { type: 'chat', uuid: u } });
+            else {
+              const who = nameOf(u);
+              Notes.add({ kind: 'message', title: `New message from ${who}`, groupTitle: n => `${n} new messages from ${who}`, body: msg.text.slice(0, 100), action: { type: 'chat', uuid: u }, group: 'msg-' + u });
+            }
           }
           save(); renderAll();
         }
@@ -367,7 +376,8 @@
   function decline() {
     const c = S.call; if (!c) return;
     ready(c.uuid) && S.conns[c.uuid].send({ t: 'call-decline' });
-    endCall();
+    c.state = 'declined';
+    endCall('You declined the call');
   }
   function hangUp() {
     const c = S.call; if (!c) return;
@@ -383,6 +393,7 @@
     try { c.call.close(); } catch {}
     $('#call-remote').srcObject = null; $('#call-local').srcObject = null;
     const secs = c.started ? Math.round((Date.now() - c.started) / 1000) : 0;
+    if (!secs && c.state === 'incoming') Notes.add({ kind: 'call', title: `Missed ${c.video ? 'video' : 'voice'} call from ${nameOf(c.uuid)}`, action: { type: 'chat', uuid: c.uuid } });
     (S.data.messages[c.uuid] ||= []).push({ id: hex(), sys: true, ts: Date.now(), text: secs ? `${c.video ? '🎥 Video' : '📞 Voice'} call · ${fmtDur(secs)}` : (reason || 'Missed call') });
     save();
     if (reason) toast(reason);
@@ -483,6 +494,7 @@
       input.value = ''; sendMessage(u, { text });
     };
     if (S.data.unread[u]) { delete S.data.unread[u]; save(); renderBadge(); }
+    Notes.readGroup('msg-' + u);
     input.focus();
   }
   function renderChatHeader() {
@@ -566,7 +578,7 @@
     $('#nav-friends').classList.add('active');
     $('#inst-view').classList.add('hidden'); $('#empty-state').classList.add('hidden');
     $('#friends-view').classList.remove('hidden');
-    renderList(); renderChat();
+    renderChat(); renderList();
   }
   function closeFriends() {
     if (!S.open) return;
@@ -601,5 +613,5 @@
     S.peer?.destroy(); S.peer = null; S.conns = {}; S.status = {}; S.active = null; S.data = null;
     closeFriends();
   }
-  window.Social = { start, stop, close: closeFriends, renderMe };
+  window.Social = { start, stop, close: closeFriends, renderMe, openChat };
 })();
