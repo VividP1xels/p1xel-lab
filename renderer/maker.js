@@ -22,9 +22,25 @@
   // Can this project go into an instance/server of version v?
   const fitsVersion = v => verAtLeast(v, '1.13') && (!M.cur.items.length || itemsOk(v)) && (!M.cur.tweaks?.spooky || verAtLeast(v, '1.15'));
 
+  const LIB = 'p1xel-items';
+  let lib = null;
+  async function loadLib() {
+    const all = await lab.maker.list();
+    lib = all.find(m => m.uid === LIB) || { uid: LIB, library: true, name: 'My Items', version: '1.0.0', description: 'Custom items made in P1xel Lab', author: state.user?.name || '', icon: '', pixels: Array(256).fill(''), items: [], commands: [], tweaks: { starterKit: [] }, updated: Date.now() };
+    return all.filter(m => m.uid !== LIB);
+  }
   async function open() {
-    M.mods = await lab.maker.list();
-    if (!M.cur || !M.mods.some(m => m.uid === M.cur.uid)) M.cur = M.mods[0] || null;
+    M.mode = 'mods';
+    M.mods = await loadLib();
+    if (!M.cur || M.cur.uid === LIB || !M.mods.some(m => m.uid === M.cur.uid)) M.cur = M.mods[0] || null;
+    if (M.tab === 'items-lib') M.tab = 'info';
+    render();
+  }
+  // Create → Items: make custom items on their own, then add them to any mod
+  async function openItems() {
+    M.mode = 'items';
+    M.mods = await loadLib();
+    M.cur = lib; M.tab = M.tab === 'build' ? 'build' : 'items';
     render();
   }
   function newMod() {
@@ -37,6 +53,7 @@
 
   function render() {
     const v = $('#create-body');
+    if (M.mode === 'items') return renderItemsMode(v);
     v.innerHTML = `
       <div class="srv-head">
         <div><p class="muted">Design a mod or data pack with no coding: custom commands like <b>/trigger pixel</b>, crafted custom weapons, a starter kit, spooky nights and more. It works in instances and servers, on Minecraft 1.13 and newer.</p></div>
@@ -58,6 +75,14 @@
       <div id="mm-tab"></div>`;
     $('#mm-body .mm-tabs').onclick = e => { const t = e.target.closest('[data-mtab]'); if (t) { M.tab = t.dataset.mtab; render(); } };
     ({ info: tabInfo, commands: tabCommands, items: tabItems, tweaks: tabTweaks, build: tabBuild })[M.tab]();
+  }
+  function renderItemsMode(v) {
+    v.innerHTML = `
+      <p class="muted">Make your own items here first: ingots and gems, <b>blocks</b>, <b>food</b>, tools, weapons and armor. Then add them to any mod with <b>➕ Add from My Items</b>, or add this whole collection to an instance by itself.</p>
+      <div class="tabs mm-tabs">${[['items', `🧱 My items (${M.cur.items.length})`], ['build', 'Build & play']].map(([k, t]) => `<button class="tab ${M.tab === k ? 'active' : ''}" data-mtab="${k}">${t}</button>`).join('')}</div>
+      <div id="mm-tab"></div>`;
+    v.querySelector('.mm-tabs').onclick = e => { const t = e.target.closest('[data-mtab]'); if (t) { M.tab = t.dataset.mtab; render(); } };
+    (M.tab === 'build' ? tabBuild : tabItems)();
   }
   const datalist = () => `<datalist id="mm-items">${ITEMS.map(i => `<option value="${i}">`).join('')}</datalist>`;
 
@@ -156,7 +181,9 @@
   }
 
   // ---------- custom items (materials, tools, weapons, armor) ----------
-  const KINDS = [['material', '💎 Material (ingot, gem…)'], ['sword', '🗡 Sword'], ['pickaxe', '⛏ Pickaxe'], ['axe', '🪓 Axe'], ['shovel', '🥄 Shovel'], ['hoe', '🌾 Hoe'], ['helmet', '⛑ Helmet'], ['chestplate', '👕 Chestplate'], ['leggings', '👖 Leggings'], ['boots', '👢 Boots'], ['other', '✨ Other (pick any item)']];
+  const KINDS = [['material', '💎 Material (ingot, gem…)'], ['sword', '🗡 Sword'], ['pickaxe', '⛏ Pickaxe'], ['axe', '🪓 Axe'], ['shovel', '🥄 Shovel'], ['hoe', '🌾 Hoe'], ['helmet', '⛑ Helmet'], ['chestplate', '👕 Chestplate'], ['leggings', '👖 Leggings'], ['boots', '👢 Boots'], ['block', '🧱 Block'], ['food', '🍎 Food'], ['other', '✨ Other (pick any item)']];
+  const BLOCK_BASES = [['reinforced_deepslate', 'Reinforced deepslate (recommended: you can\'t get it in survival)'], ['crying_obsidian', 'Crying obsidian'], ['gilded_blackstone', 'Gilded blackstone'], ['budding_amethyst', 'Budding amethyst'], ['lodestone', 'Lodestone'], ['shroomlight', 'Shroomlight'], ['raw_gold_block', 'Block of raw gold'], ['end_stone_bricks', 'End stone bricks']];
+  const EFFECTS = ['speed', 'haste', 'strength', 'jump_boost', 'regeneration', 'resistance', 'fire_resistance', 'water_breathing', 'invisibility', 'night_vision', 'health_boost', 'absorption', 'saturation', 'glowing', 'luck', 'slow_falling', 'conduit_power', 'dolphins_grace', 'hero_of_the_village', 'nausea', 'blindness', 'darkness', 'levitation', 'poison', 'wither', 'slowness', 'weakness', 'hunger'];
   const TOOLS = ['sword', 'pickaxe', 'axe', 'shovel', 'hoe'], ARMOR = ['helmet', 'chestplate', 'leggings', 'boots'];
   // Netherite numbers, and two stronger tiers
   const TIERS = {
@@ -183,6 +210,14 @@
   function newItem(kind, name, color, tier = 'stronger', material) {
     const it = { kind, name, displayName: name, color, count: 1, enchantments: [], glow: kind === 'material', unbreakable: false, fireproof: true, lore: '', grid: Array(9).fill(''), stats: tierStats(kind, tier), texture: '' };
     if (SHAPES[kind] && material) it.grid = SHAPES[kind].map(x => x === AT ? '@' + slug(material) : x);
+    if (kind === 'block') {
+      it.grid = material ? Array(9).fill('@' + slug(material)) : ['obsidian', 'obsidian', 'obsidian', 'obsidian', 'amethyst_shard', 'obsidian', 'obsidian', 'obsidian', 'obsidian'];
+      it.unpackTo = material ? '@' + slug(material) : ''; it.unpackCount = 9; it.blockBase = 'reinforced_deepslate'; it.texture = blockTexture(color); it.fireproof = false; it.glow = false;
+    }
+    if (kind === 'food') {
+      it.grid = ['', 'gold_nugget', '', 'gold_nugget', 'apple', 'gold_nugget', '', 'gold_nugget', '']; it.stats = { nutrition: 6, saturation: 7.2, eatSeconds: 1.6 };
+      it.effects = [{ id: 'speed', seconds: 30, level: 1 }]; it.alwaysEat = true; it.base = 'apple'; it.fireproof = false; it.glow = true; it.texture = '';
+    }
     if (kind === 'material') { it.grid = ['netherite_ingot', 'echo_shard', 'netherite_ingot', 'echo_shard', 'nether_star', 'echo_shard', 'netherite_ingot', 'echo_shard', 'netherite_ingot']; it.lore = 'Stronger than netherite'; it.texture = ingotTexture(color); }
     return it;
   }
@@ -195,6 +230,19 @@
     const pal = { k: '#120a1e', h: lift(0.55), l: lift(0.15), m: sh(0.8), d: sh(0.5) };
     const c = document.createElement('canvas'); c.width = c.height = 16; const x = c.getContext('2d');
     shape.forEach((row, y) => [...row].forEach((ch, i) => { if (pal[ch]) { x.fillStyle = pal[ch]; x.fillRect(i, y, 1, 1); } }));
+    return c.toDataURL('image/png');
+  }
+  // A storage-block texture (like a block of netherite) in any color
+  function blockTexture(hex) {
+    const [r, g, b] = ColorPicker.hex2rgb(/^#/.test(hex) ? hex : '#7a2cff');
+    const mix = (f, w) => ColorPicker.rgb2hex([r, g, b].map(v => w ? v + (255 - v) * f : v * f));
+    const c = document.createElement('canvas'); c.width = c.height = 16; const x = c.getContext('2d');
+    for (let y = 0; y < 16; y++) for (let i = 0; i < 16; i++) {
+      const edge = i === 0 || y === 0 ? mix(0.35, true) : i === 15 || y === 15 ? mix(0.45) : null;
+      const noise = ((i * 7 + y * 13) % 5) / 40;
+      x.fillStyle = edge || ((i === 7 || i === 8 || y === 7 || y === 8) ? mix(0.62 + noise) : mix(0.78 + noise));
+      x.fillRect(i, y, 1, 1);
+    }
     return c.toDataURL('image/png');
   }
   // Recolor a game texture (like the netherite sword) to your item's color, keeping its shading
@@ -220,12 +268,25 @@
     const mats = m.items.filter(x => x.kind === 'material');
     $('#mm-tab').innerHTML = `${datalist()}<datalist id="mm-mats">${mats.map(x => `<option value="@${slug(x.name)}">${esc(x.displayName)} (yours)</option>`).join('')}${ITEMS.map(i => `<option value="${i}">`).join('')}</datalist>
       <p class="muted">Make brand-new materials (like a <b>Voidwrought Ingot</b>), then tools, weapons and armor made from them, even stronger than netherite. Use your own material in a recipe by typing <code>@</code> and its name, like <code>@voidwrought_ingot</code>.</p>
-      <div class="srv-card set-maker"><b>✨ Make a full material set</b><p class="fine">Makes the ingot plus a sword, pickaxe, axe, shovel and all 4 armor pieces, with their recipes already filled in.</p>
+      <div class="srv-card set-maker"><b>✨ Make a full material set</b><p class="fine">Makes the ingot, a block (9 ingots), a sword, pickaxe, axe, shovel, hoe and all 4 armor pieces, with their recipes already filled in.</p>
         <div class="row"><input id="set-name" placeholder="Material name, like Voidwrought" maxlength="20"><button type="button" class="cp-btn" id="set-color" style="--c:#7a2cff"><i></i>RGB</button>
         <select id="set-tier"><option value="stronger">⭐ Stronger than netherite</option><option value="way">💀 Way stronger</option><option value="netherite">Like netherite</option></select>
         <button class="btn btn-primary" id="set-go">Make set</button></div></div>
       <div id="mm-items-list">${m.items.map((it, i) => itemCard(it, i)).join('')}</div>
+      ${M.mode !== 'items' && lib?.items.length ? `<div class="srv-card"><b>➕ Add from My Items</b><div class="row"><select id="lib-pick">${lib.items.map((x, n) => `<option value="${n}">${esc(x.displayName)}</option>`).join('')}<option value="all">All of them (${lib.items.length})</option></select><button class="btn btn-ghost" id="lib-add">Add to this mod</button></div><p class="fine">Materials and blocks an item needs come along automatically.</p></div>` : ''}
       <div class="row"><select id="mm-kind">${KINDS.map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select><button class="btn btn-primary" id="mm-add-item">+ Add item</button></div>`;
+    $('#lib-add') && ($('#lib-add').onclick = () => {
+      const v = $('#lib-pick').value;
+      const want = v === 'all' ? lib.items.slice() : [lib.items[+v]];
+      // also bring materials/blocks they use
+      const needs = new Set();
+      const scan = it => { for (const g of [...(it.grid || []), it.unpackTo || '']) if (String(g).startsWith('@')) needs.add(String(g).slice(1)); };
+      want.forEach(scan);
+      for (const x of lib.items) if (needs.has(slug(x.name)) && !want.includes(x)) want.unshift(x);
+      let added = 0;
+      for (const x of want) { if (m.items.some(y => slug(y.name) === slug(x.name))) continue; m.items.push(JSON.parse(JSON.stringify(x))); added++; }
+      save(); render(); toast(added ? `Added ${added} item${added > 1 ? 's' : ''} from My Items!` : 'Those are already in this mod.', added ? 'ok' : '');
+    });
     let setColor = '#7a2cff';
     ColorPicker.bind($('#set-color'), () => setColor, h => { setColor = h; });
     $('#set-go').onclick = () => {
@@ -234,11 +295,14 @@
       if (m.items.filter(x => x.kind === 'material').length >= 6) return toast('You can have up to 6 materials in one mod.', 'err');
       const tier = $('#set-tier').value, ingot = `${name} Ingot`;
       m.items.push(newItem('material', ingot, setColor, tier));
+      const usedBases = new Set(m.items.filter(x => x.kind === 'block').map(x => x.blockBase));
+      const freeBase = BLOCK_BASES.map(b => b[0]).find(b => !usedBases.has(b));
+      if (freeBase) { const blk = newItem('block', `${name} Block`, setColor, tier, ingot); blk.blockBase = freeBase; m.items.push(blk); }
       for (const k of [...TOOLS, ...ARMOR]) m.items.push(newItem(k, `${name} ${NAMES[k]}`, setColor, tier, ingot));
       save(); render();
-      toast(`Made ${name}: an ingot, 5 tools and 4 armor pieces! Click 🎨 Recolor on each one to give it a matching texture.`, 'ok');
+      toast(`Made ${name}: an ingot, a block, 5 tools and 4 armor pieces!`, 'ok');
       // Give the tools and armor recolored netherite textures automatically
-      m.items.filter(x => x.name.startsWith(name + ' ') && x.kind !== 'material').forEach(async it => {
+      m.items.filter(x => x.name.startsWith(name + ' ') && !['material', 'block'].includes(x.kind)).forEach(async it => {
         try { it.texture = await recolor(`item/netherite_${it.kind}`, setColor); save(); render(); } catch {}
       });
     };
@@ -257,10 +321,15 @@
       if (f === 'grid') it.grid[+e.target.dataset.slot] = e.target.value.trim();
       else if (f === 'ench-id') it.enchantments[+e.target.dataset.e].id = e.target.value;
       else if (f === 'ench-lvl') it.enchantments[+e.target.dataset.e].level = +e.target.value;
+      else if (f === 'eff-id') it.effects[+e.target.dataset.e].id = e.target.value;
+      else if (f === 'eff-sec') it.effects[+e.target.dataset.e].seconds = +e.target.value;
+      else if (f === 'eff-lvl') it.effects[+e.target.dataset.e].level = +e.target.value;
+      else if (f === 'unpackCount') it.unpackCount = +e.target.value;
+      else if (f === 'blockBase') { it.blockBase = e.target.value; save(); render(); return; }
       else if (f?.startsWith('stat-')) (it.stats ||= {})[f.slice(5)] = +e.target.value;
       else if (e.target.type === 'checkbox') it[f] = e.target.checked;
       else if (['count', 'damage'].includes(f)) it[f] = +e.target.value;
-      else if (f === 'kind') { it.kind = e.target.value; it.stats = tierStats(it.kind, 'stronger'); save(); render(); return; }
+      else if (f === 'kind') { const fresh = newItem(e.target.value, it.displayName, hexColor(it), 'stronger', m.items.find(x => x.kind === 'material')?.name); Object.assign(it, { kind: fresh.kind, stats: fresh.stats, effects: fresh.effects, blockBase: fresh.blockBase, unpackTo: fresh.unpackTo, unpackCount: fresh.unpackCount }); if (!it.texture || fresh.kind === 'block') it.texture = fresh.texture || it.texture; save(); render(); return; }
       else if (f) { it[f] = e.target.value; if (f === 'displayName') { it.name = e.target.value || 'item'; card.querySelector('.it-preview').textContent = e.target.value || '(no name)'; } }
       if (f === 'color') card.querySelector('.it-preview').style.color = hexColor(it);
       save();
@@ -278,9 +347,11 @@
       if (act === 'del') { if (confirm(`Remove ${it.displayName}?`)) { m.items.splice(+card.dataset.item, 1); save(); render(); } }
       if (act === 'add-ench') { it.enchantments.push({ id: 'unbreaking', level: 3 }); save(); render(); }
       if (act === 'rm-ench') { it.enchantments.splice(+e.target.dataset.e, 1); save(); render(); }
+      if (act === 'add-eff') { (it.effects ||= []).push({ id: 'regeneration', seconds: 10, level: 1 }); save(); render(); }
+      if (act === 'rm-eff') { it.effects.splice(+e.target.dataset.e, 1); save(); render(); }
       if (e.target.dataset.tier) { it.stats = tierStats(it.kind, e.target.dataset.tier); save(); render(); toast('Stats updated!', 'ok'); }
       if (act === 'auto-tex') {
-        try { it.texture = it.kind === 'material' ? ingotTexture(hexColor(it)) : await recolor(TOOLS.includes(it.kind) || ARMOR.includes(it.kind) ? `item/netherite_${it.kind}` : `item/${String(it.base || 'stick').replace('minecraft:', '')}`, hexColor(it)); save(); render(); }
+        try { it.texture = it.kind === 'material' ? ingotTexture(hexColor(it)) : it.kind === 'block' ? blockTexture(hexColor(it)) : await recolor(TOOLS.includes(it.kind) || ARMOR.includes(it.kind) ? `item/netherite_${it.kind}` : `item/${String(it.base || 'stick').replace('minecraft:', '')}`, hexColor(it)); save(); render(); }
         catch (err) { toast(navigator.onLine ? errMsg(err) : 'Connect to the internet once so P1xel Lab can get Minecraft\'s textures.', 'err'); }
       }
       if (act === 'clear-tex') { it.texture = ''; save(); render(); }
@@ -323,6 +394,14 @@
       ? `<div class="row2">${num('damage', 'Attack damage', 0.5, 1, 200)}${num('speed', 'Attack speed', 0.1, 0.1, 10)}${kind !== 'sword' ? num('mining', 'Mining speed', 1, 1, 100) : ''}${num('durability', 'Durability', 50, 1, 100000)}</div>`
       : ARMOR.includes(kind)
         ? `<div class="row2">${num('armor', 'Armor', 0.5, 0, 30)}${num('toughness', 'Toughness', 0.5, 0, 20)}${num('kb', 'Knockback resist', 0.05, 0, 1)}${num('durability', 'Durability', 50, 1, 100000)}</div>`
+        : kind === 'block' ? `<div class="row2"><label class="field"><span>Takes over this block</span><select data-f="blockBase">${BLOCK_BASES.map(([b, t]) => `<option value="${b}" ${b === (it.blockBase || 'reinforced_deepslate') ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+            <label class="field"><span>Crafts back into</span><input list="mm-mats" data-f="unpackTo" value="${esc(it.unpackTo || '')}" placeholder="@voidwrought_ingot (optional)"></label><label class="field sm"><span>How many</span><input type="number" min="1" max="64" data-f="unpackCount" value="${it.unpackCount || 9}"></label></div>
+            <p class="fine">🧱 New blocks need a coded mod, so your block takes over one rare Minecraft block. Every <b>${esc((it.blockBase || 'reinforced_deepslate').replace(/_/g, ' '))}</b> in the world looks like yours and drops yours when mined${(it.blockBase || 'reinforced_deepslate') === 'reinforced_deepslate' ? ' (mine it with a pickaxe; it\'s tough, like obsidian). Ancient cities have some, so they\'ll turn into your block too' : ''}.</p>`
+        : kind === 'food' ? `<div class="row2">${num('nutrition', 'Hunger it fills', 1, 0, 40)}${num('saturation', 'Saturation', 0.5, 0, 40)}${num('eatSeconds', 'Eating time (sec)', 0.1, 0.1, 30)}<label class="field"><span>Looks like (until you draw it)</span><input list="mm-items" data-f="base" value="${esc(it.base || 'apple')}"></label></div>
+            <label class="check"><input type="checkbox" data-f="alwaysEat" ${it.alwaysEat ? 'checked' : ''}> Can eat even when not hungry</label>
+            <b class="lbl">Effects when eaten</b>
+            ${(it.effects || []).map((ef, e) => `<div class="row ench"><select data-f="eff-id" data-e="${e}">${EFFECTS.map(x => `<option ${x === ef.id ? 'selected' : ''}>${x}</option>`).join('')}</select><input type="number" min="1" max="3600" data-f="eff-sec" data-e="${e}" value="${ef.seconds}" title="Seconds"><input type="number" min="1" max="10" data-f="eff-lvl" data-e="${e}" value="${ef.level}" title="Level"><button class="mini" data-act="rm-eff" data-e="${e}">✕</button></div>`).join('')}
+            <button class="btn btn-ghost" data-act="add-eff">+ Effect</button>`
         : kind === 'other' ? `<div class="row2"><label class="field"><span>Based on</span><input list="mm-items" data-f="base" value="${esc(it.base || '')}"></label><label class="field sm"><span>Attack damage <small>(0 = normal)</small></span><input type="number" min="0" max="100" data-f="damage" value="${it.damage || 0}"></label></div>` : '';
     const netherite = TIERS.netherite;
     const compare = TOOLS.includes(kind) ? `Netherite ${NAMES[kind].toLowerCase()}: ${netherite.damage[kind]} damage, ${netherite.durability} durability` : ARMOR.includes(kind) ? `Netherite ${NAMES[kind].toLowerCase()}: ${netherite.armor[kind]} armor, 3 toughness` : '';
@@ -338,7 +417,7 @@
           <b class="lbl">Texture</b>
           <canvas class="tex-cv" id="tex-${i}" width="160" height="160"></canvas>
           <div class="tools"><button class="chip on" data-ttool="pen">✏️</button><button class="chip" data-ttool="erase">🧽</button>${ColorPicker.swatch('tex-col-' + i, hexColor(it))}</div>
-          <div class="tools"><button class="chip" data-act="auto-tex">🎨 ${kind === 'material' ? 'Make ingot' : 'Recolor netherite'}</button><button class="chip" data-act="clear-tex">Clear</button></div>
+          <div class="tools"><button class="chip" data-act="auto-tex">🎨 ${kind === 'material' ? 'Make ingot' : kind === 'block' ? 'Make block' : kind === 'food' ? 'Recolor' : 'Recolor netherite'}</button><button class="chip" data-act="clear-tex">Clear</button></div>
         </div>
         <div>
           <div class="row2"><label class="field"><span>Name</span><input data-f="displayName" maxlength="40" value="${esc(it.displayName)}"></label>
@@ -350,10 +429,10 @@
           ${compare ? `<p class="fine">For comparison: ${compare}.</p>` : ''}
           <div class="row2"><label class="check"><input type="checkbox" data-f="glow" ${it.glow ? 'checked' : ''}> Glow</label>
           <label class="check"><input type="checkbox" data-f="fireproof" ${it.fireproof ? 'checked' : ''}> Lava-proof</label>
-          ${kind !== 'material' ? `<label class="check"><input type="checkbox" data-f="unbreakable" ${it.unbreakable ? 'checked' : ''}> Unbreakable</label>` : ''}</div>
-          ${kind !== 'material' ? `<b class="lbl">Enchantments</b>
+          ${!['material', 'block', 'food'].includes(kind) ? `<label class="check"><input type="checkbox" data-f="unbreakable" ${it.unbreakable ? 'checked' : ''}> Unbreakable</label>` : ''}</div>
+          ${kind !== 'material' && kind !== 'block' && kind !== 'food' ? `<b class="lbl">Enchantments</b>
           ${(it.enchantments || []).map((en, e) => `<div class="row ench"><select data-f="ench-id" data-e="${e}">${ENCH.map(x => `<option ${x === en.id ? 'selected' : ''}>${x}</option>`).join('')}</select><input type="number" min="1" max="255" data-f="ench-lvl" data-e="${e}" value="${en.level}"><button class="mini" data-act="rm-ench" data-e="${e}">✕</button></div>`).join('')}
-          <button class="btn btn-ghost" data-act="add-ench">+ Enchantment</button>` : '<p class="fine">💎 This is a material: use it in other recipes with <code>@' + esc(slug(it.name)) + '</code>.</p>'}
+          <button class="btn btn-ghost" data-act="add-ench">+ Enchantment</button>` : kind === 'food' ? '' : '<p class="fine">💎 Use it in other recipes with <code>@' + esc(slug(it.name)) + '</code>.</p>'}
         </div>
       </div>
     </div>`;
@@ -447,5 +526,5 @@
     });
   }
 
-  window.Maker = { open };
+  window.Maker = { open, openItems };
 })();

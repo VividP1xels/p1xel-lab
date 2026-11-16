@@ -1331,11 +1331,21 @@ function buildModFiles(mod, mc) {
   if (materials.length > CARRIERS.length) throw new Error(`You can make up to ${CARRIERS.length} new materials per mod.`);
   const matBase = {};
   materials.forEach((it, i) => { matBase[iidOf(it)] = 'minecraft:' + CARRIERS[i]; });
+  // Custom blocks take over one rarely-seen Minecraft block (its look, and what it drops)
+  const BLOCK_BASES = ['reinforced_deepslate', 'crying_obsidian', 'gilded_blackstone', 'budding_amethyst', 'lodestone', 'shroomlight', 'raw_gold_block', 'end_stone_bricks'];
+  const usedBases = new Set();
+  for (const it of items.filter(x => x.kind === 'block')) {
+    const b = BLOCK_BASES.includes(it.blockBase) ? it.blockBase : 'reinforced_deepslate';
+    if (usedBases.has(b)) throw new Error(`Two of your blocks use ${b.replace(/_/g, ' ')}. Pick a different base block for "${it.displayName}".`);
+    usedBases.add(b);
+    matBase[iidOf(it)] = 'minecraft:' + b;
+  }
+  const compsOf = {};
   const ingredient = x => {
     if (!x) return '';
     if (x.startsWith('@')) {
       const id = ID(x.slice(1));
-      if (!matBase[id]) throw new Error(`"${x}" isn't one of your materials. Make it a Material item first.`);
+      if (!matBase[id]) throw new Error(`"${x}" isn't one of your materials or blocks. Make it first (Material or Block).`);
       return matBase[id];
     }
     return mcId(x);
@@ -1349,7 +1359,7 @@ function buildModFiles(mod, mc) {
   items.forEach((it, index) => {
     const iid = iidOf(it);
     const kind = it.kind || 'other';
-    const base = kind === 'material' ? matBase[iid] : KIND_BASE[kind] ? 'minecraft:' + KIND_BASE[kind] : mcId(it.base || 'minecraft:stick');
+    const base = kind === 'material' || kind === 'block' ? matBase[iid] : KIND_BASE[kind] ? 'minecraft:' + KIND_BASE[kind] : kind === 'food' ? mcId(it.base || 'minecraft:apple') : mcId(it.base || 'minecraft:stick');
     const grid = (it.grid || []).slice(0, 9).map(ingredient);
     while (grid.length < 9) grid.push('');
     let rows = [0, 1, 2].map(r => grid.slice(r * 3, r * 3 + 3));
@@ -1387,11 +1397,37 @@ function buildModFiles(mod, mc) {
     if (TOOL_TAG[kind] && Number(st.mining) > 0) comps['minecraft:tool'] = { rules: [{ blocks: '#minecraft:incorrect_for_netherite_tool', correct_for_drops: false }, { blocks: TOOL_TAG[kind], speed: Number(st.mining), correct_for_drops: true }], default_mining_speed: 1, damage_per_block: 1 };
     if ((HANDHELD.has(kind) || ARMOR_SLOT[kind]) && Number(st.durability) > 0) comps['minecraft:max_damage'] = Math.min(100000, Math.round(Number(st.durability)));
     if (kind === 'material') { comps['minecraft:max_stack_size'] = 64; comps['minecraft:enchantment_glint_override'] = !!it.glow; }
-    else if (it.glow) comps['minecraft:enchantment_glint_override'] = true;
+    if (kind === 'food') {
+      const nutrition = Math.max(0, Math.min(40, Math.round(Number(st.nutrition) || 4)));
+      const saturation = Math.max(0, Math.min(40, Number(st.saturation) || 2.4));
+      const secs = Math.max(0.1, Math.min(30, Number(st.eatSeconds) || 1.6));
+      const effects = (it.effects || []).filter(e => e.id).map(e => ({ id: mcId(e.id), duration: Math.round(Math.max(1, Number(e.seconds) || 10) * 20), amplifier: Math.max(0, Math.min(9, (Number(e.level) || 1) - 1)) }));
+      if (newRecipes) {
+        comps['minecraft:food'] = { nutrition, saturation, can_always_eat: !!it.alwaysEat };
+        comps['minecraft:consumable'] = { consume_seconds: secs, animation: 'eat', has_consume_particles: true, ...(effects.length ? { on_consume_effects: [{ type: 'minecraft:apply_effects', effects, probability: 1 }] } : {}) };
+      } else {
+        comps['minecraft:food'] = { nutrition, saturation, can_always_eat: !!it.alwaysEat, eat_seconds: secs, ...(effects.length ? { effects: effects.map(effect => ({ effect, probability: 1 })) } : {}) };
+      }
+      comps['minecraft:max_stack_size'] = 64;
+      if (it.glow) comps['minecraft:enchantment_glint_override'] = true;
+    }
+    else if (it.glow && kind !== 'food') comps['minecraft:enchantment_glint_override'] = true;
     if (it.fireproof) { if (newRecipes) comps['minecraft:damage_resistant'] = { types: '#minecraft:is_fire' }; else comps['minecraft:fire_resistant'] = {}; }
     if (it.unbreakable) comps['minecraft:unbreakable'] = {};
     // the item's own texture
-    if (String(it.texture || '').startsWith('data:image/png;base64,')) {
+    if (kind === 'block' && String(it.texture || '').startsWith('data:image/png;base64,')) {
+      const bname = base.replace('minecraft:', '');
+      put(`assets/${modid}/textures/block/${iid}.png`, Buffer.from(it.texture.split(',')[1], 'base64'));
+      put(`assets/${modid}/models/block/${iid}.json`, { parent: 'minecraft:block/cube_all', textures: { all: `${modid}:block/${iid}` } });
+      put(`assets/minecraft/blockstates/${bname}.json`, { variants: { '': { model: `${modid}:block/${iid}` } } });
+      if (itemModel) {
+        put(`assets/${modid}/items/${iid}.json`, { model: { type: 'minecraft:model', model: `${modid}:block/${iid}` } });
+        comps['minecraft:item_model'] = `${modid}:${iid}`;
+      } else {
+        // the block itself now looks like yours, so its item can simply use the same model
+        put(`assets/minecraft/models/item/${bname}.json`, { parent: `${modid}:block/${iid}` });
+      }
+    } else if (String(it.texture || '').startsWith('data:image/png;base64,')) {
       const parent = HANDHELD.has(kind) ? 'minecraft:item/handheld' : 'minecraft:item/generated';
       put(`assets/${modid}/textures/item/${iid}.png`, Buffer.from(it.texture.split(',')[1], 'base64'));
       put(`assets/${modid}/models/item/${iid}.json`, { parent, textures: { layer0: `${modid}:item/${iid}` } });
@@ -1405,10 +1441,25 @@ function buildModFiles(mod, mc) {
       }
     }
     put(`data/${modid}/recipe/${iid}.json`, {
-      type: 'minecraft:crafting_shaped', category: kind === 'material' ? 'misc' : 'equipment', pattern, key,
+      type: 'minecraft:crafting_shaped', category: kind === 'material' || kind === 'block' ? 'misc' : kind === 'food' ? 'misc' : 'equipment', pattern, key,
       result: { id: base, count: Math.min(64, Math.max(1, Number(it.count) || 1)), components: comps },
     });
+    compsOf[iid] = { base, comps };
+    if (kind === 'block') {
+      const bname = base.replace('minecraft:', '');
+      if (bname === 'reinforced_deepslate') put('data/minecraft/tags/block/mineable/pickaxe.json', { replace: false, values: ['minecraft:reinforced_deepslate'] });
+      put(`data/minecraft/loot_table/blocks/${bname}.json`, { type: 'minecraft:block', pools: [{ rolls: 1, bonus_rolls: 0, conditions: [{ condition: 'minecraft:survives_explosion' }], entries: [{ type: 'minecraft:item', name: base, functions: [{ function: 'minecraft:set_components', components: comps }] }] }] });
+    }
   });
+  // "Craft back into 9 ingots" for blocks
+  for (const it of items.filter(x => x.kind === 'block' && x.unpackTo)) {
+    const to = compsOf[ID(String(it.unpackTo).replace(/^@/, ''))], from = compsOf[iidOf(it)];
+    if (!to || !from) continue;
+    put(`data/${modid}/recipe/${iidOf(it)}_to_${ID(String(it.unpackTo).replace(/^@/, ''))}.json`, {
+      type: 'minecraft:crafting_shapeless', category: 'misc', ingredients: [newRecipes ? from.base : { item: from.base }],
+      result: { id: to.base, count: Math.min(64, Math.max(1, Number(it.unpackCount) || 9)), components: to.comps },
+    });
+  }
   // Older versions: add our models to the base item's model as overrides
   const CARRIER_MODEL = { debug_stick: { parent: 'minecraft:item/handheld', textures: { layer0: 'minecraft:item/stick' } } };
   for (const [base, list] of Object.entries(overrides)) {
