@@ -325,6 +325,8 @@
       else if (f === 'eff-sec') it.effects[+e.target.dataset.e].seconds = +e.target.value;
       else if (f === 'eff-lvl') it.effects[+e.target.dataset.e].level = +e.target.value;
       else if (f === 'unpackCount') it.unpackCount = +e.target.value;
+      else if (f === 'recipeType') { it.recipeType = e.target.value; save(); render(); return; }
+      else if (f === 'xp' || f === 'cookSeconds') it[f] = +e.target.value;
       else if (f === 'blockBase') { it.blockBase = e.target.value; save(); render(); return; }
       else if (f?.startsWith('stat-')) (it.stats ||= {})[f.slice(5)] = +e.target.value;
       else if (e.target.type === 'checkbox') it[f] = e.target.checked;
@@ -412,8 +414,11 @@
       <div class="mm-item-grid">
         <div>
           <b class="lbl">Recipe</b>
+          <select data-f="recipeType" class="rtype">${[['shaped', '🟫 Crafting table (shape matters)'], ['shapeless', '🔀 Crafting (any shape)'], ['smelting', '🔥 Furnace'], ['blasting', '⚙ Blast furnace'], ['smoking', '💨 Smoker'], ['campfire', '🏕 Campfire']].map(([v, t]) => `<option value="${v}" ${(it.recipeType || 'shaped') === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
+          ${['smelting', 'blasting', 'smoking', 'campfire'].includes(it.recipeType) ? `<div class="furnace"><input list="mm-mats" data-f="grid" data-slot="0" value="${esc(it.grid[0] || '')}" placeholder="What goes in" title="What goes in"><span>🔥 ➜</span><b>${esc(it.displayName)}</b></div>
+          <div class="row2"><label class="field sm"><span>XP</span><input type="number" min="0" max="100" step="0.1" data-f="xp" value="${it.xp ?? 1}"></label><label class="field sm"><span>Seconds</span><input type="number" min="0.5" max="600" step="0.5" data-f="cookSeconds" value="${it.cookSeconds ?? ({ smelting: 10, blasting: 5, smoking: 5, campfire: 30 }[it.recipeType])}"></label></div>` : `
           <div class="craft">${[0, 1, 2, 3, 4, 5, 6, 7, 8].map(s => `<input list="mm-mats" data-f="grid" data-slot="${s}" value="${esc(it.grid[s] || '')}" placeholder="—" title="Item in this slot">`).join('')}</div>
-          <p class="fine">Type an item in each slot, like <code>diamond</code>, or <code>@name</code> for your own material.</p>
+          <p class="fine">${it.recipeType === 'shapeless' ? 'Put the items anywhere; the shape doesn\'t matter.' : 'Type an item in each slot, like <code>diamond</code>, or <code>@name</code> for your own material.'}</p>`}
           <b class="lbl">Texture</b>
           <canvas class="tex-cv" id="tex-${i}" width="160" height="160"></canvas>
           <div class="tools"><button class="chip on" data-ttool="pen">✏️</button><button class="chip" data-ttool="erase">🧽</button>${ColorPicker.swatch('tex-col-' + i, hexColor(it))}</div>

@@ -341,6 +341,12 @@
         if (Date.now() - S.data.feed[p.id].ts < 3600000) Notes.add({ kind: 'share', title: `${nameOf(u)} posted`, body: S.data.feed[p.id].text.slice(0, 80) || (p.media?.kind === 'video' ? '🎬 a video' : '📷 a picture'), action: { type: 'feed' }, group: 'post-' + u });
         save(); changed(); return;
       }
+      case 'react': {
+        const m = (S.data.messages[u] || []).find(x => x.id === d.id); if (!m) return;
+        const has = (m.reactions?.[d.emoji] || []).includes(u);
+        if (!!d.on !== has) { react(u, d.id, String(d.emoji), u); if (d.on && !(S.open && S.active === u)) toast(`${nameOf(u)} reacted ${d.emoji}`); }
+        return;
+      }
       case 'post-edit': { const p = S.data.feed[d.id]; if (p && p.author === u) { p.text = String(d.text || '').slice(0, 1000); p.edited = true; save(); changed(); } return; }
       case 'post-delete': { const p = S.data.feed[d.id]; if (p && p.author === u) { delete S.data.feed[d.id]; lab.posts.deleteMedia(d.id).catch(() => {}); save(); changed(); } return; }
       case 'like': {
@@ -689,9 +695,22 @@
            ${m.me ? '' : `<button class="btn btn-primary" data-addshare="${i}">Add to my launcher</button>`}</div>`
         : esc(m.text);
       const tick = m.me ? `<span class="tick" title="${m.st === 'delivered' ? 'Delivered' : 'Waiting to send'}">${m.st === 'delivered' ? '✓✓' : '🕓'}</span>` : '';
-      return sep + `<div class="bubble ${m.me ? 'me' : 'them'}">${body}<span class="meta">${time(m.ts)} ${tick}</span></div>`;
+      const reacts = Object.entries(m.reactions || {}).filter(([, who]) => who.length);
+      return sep + `<div class="bubble ${m.me ? 'me' : 'them'}" data-mid="${esc(m.id)}">${body}<span class="meta">${time(m.ts)} ${tick}</span>
+        <span class="react-bar">${REACTS.map(r => `<button data-react="${r}">${r}</button>`).join('')}</span>
+        ${reacts.length ? `<span class="reacts">${reacts.map(([r, who]) => `<b class="${who.includes(S.me.uuid) ? 'mine' : ''}" data-react="${r}">${r}${who.length > 1 ? ' ' + who.length : ''}</b>`).join('')}</span>` : ''}</div>`;
     }).join('') : `<div class="chat-empty small"><p class="muted">Say hi to ${esc(nameOf(u))}! 👋</p></div>`;
     if (atBottom || !el.dataset.init) { el.scrollTop = el.scrollHeight; el.dataset.init = 1; }
+  }
+  const REACTS = ['❤️', '😂', '😮', '😢', '👍', '🔥'];
+  function react(u, id, emoji, who) {
+    const m = (S.data.messages[u] || []).find(x => x.id === id); if (!m || !REACTS.includes(emoji)) return false;
+    m.reactions ||= {};
+    const list = (m.reactions[emoji] ||= []);
+    const i = list.indexOf(who);
+    if (i >= 0) list.splice(i, 1); else list.push(who);
+    save(); if (S.active === u) renderMessages();
+    return i < 0;
   }
   const time = ts => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
@@ -706,6 +725,12 @@
     else if (act === 'more') $('#chat-menu').classList.toggle('hidden');
     else if (act === 'remove') { if (confirm(`Remove ${nameOf(u)} from your friends?`)) removeFriend(u, false); }
     else if (act === 'block') { if (confirm(`Block ${nameOf(u)}? They won't be able to message, call or friend you.`)) removeFriend(u, true); }
+    const rb = e.target.closest('[data-react]');
+    if (rb) {
+      const mid = rb.closest('[data-mid]')?.dataset.mid;
+      if (mid) { const added = react(u, mid, rb.dataset.react, S.me.uuid); if (ready(u)) S.conns[u].send({ t: 'react', id: mid, emoji: rb.dataset.react, on: added }); }
+      return;
+    }
     const af = e.target.closest('[data-addfile]');
     if (af) addReceivedFile(S.data.messages[u][+af.dataset.addfile].file, af);
     if (e.target.closest('[data-act=profile]')) window.dispatchEvent(new CustomEvent('open-profile', { detail: u }));

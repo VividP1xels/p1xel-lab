@@ -167,11 +167,12 @@ ipcMain.handle('store:get', () => {
     ramMB: s.ramMB || 4096,
     javaPath: s.javaPath || '',
     accent: s.accent || '',
+    themePreset: s.themePreset || 'purple',
   };
 });
 ipcMain.handle('store:set', (_e, patch) => {
   const allowed = {};
-  for (const k of ['tutorialDone', 'ramMB', 'javaPath', 'accent']) if (k in patch) allowed[k] = patch[k];
+  for (const k of ['tutorialDone', 'ramMB', 'javaPath', 'accent', 'themePreset']) if (k in patch) allowed[k] = patch[k];
   if ('curseforgeKey' in patch) saveSecret('cfKey', patch.curseforgeKey || '');
   writeStore(allowed);
   return true;
@@ -270,7 +271,25 @@ ipcMain.handle('instances:list', async () => {
   const ids = await fsp.readdir(INST_ROOT());
   const list = [];
   for (const id of ids) { try { list.push(await readInstance(id)); } catch {} }
-  return list.sort((a, b) => (b.lastPlayed || b.created) - (a.lastPlayed || a.created));
+  return list.sort((a, b) => (!!b.favorite - !!a.favorite) || (b.lastPlayed || b.created) - (a.lastPlayed || a.created));
+});
+ipcMain.handle('instances:update', async (_e, { id, patch }) => {
+  const inst = await readInstance(id);
+  if ('favorite' in patch) inst.favorite = !!patch.favorite;
+  if ('name' in patch && String(patch.name).trim()) inst.name = String(patch.name).trim().slice(0, 40);
+  if ('gamerules' in patch) inst.gamerules = patch.gamerules;
+  return writeInstance(inst);
+});
+ipcMain.handle('instances:duplicate', async (_e, id) => {
+  if (running.has(id)) throw new Error('Close Minecraft first.');
+  const inst = await readInstance(id);
+  const name = `${inst.name} (copy)`.slice(0, 40);
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'copy';
+  let nid = slug, n = 2;
+  while (fs.existsSync(instDir(nid))) nid = `${slug}-${n++}`;
+  await fsp.cp(instDir(id), instDir(nid), { recursive: true, filter: src => !/[\\/](logs|crash-reports|backups)([\\/]|$)/.test(path.relative(instDir(id), src) ? '/' + path.relative(instDir(id), src) : '') });
+  const copy = { ...inst, id: nid, name, created: Date.now(), lastPlayed: null, playtime: 0, favorite: false };
+  return writeInstance(copy);
 });
 ipcMain.handle('instances:create', async (_e, { name, mcVersion, loader, icon }) => {
   const slug = (name || 'instance').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'instance';
@@ -321,7 +340,15 @@ function cleanQuery(q) {
 const OUR_LOADERS = ['fabric', 'quilt', 'forge', 'neoforge'];
 const CF_LOADER_NAME = { 1: 'forge', 4: 'fabric', 5: 'quilt', 6: 'neoforge' };
 const byVersionDesc = (a, b) => (newerOrSame(a, b) ? (a === b ? 0 : -1) : 1);
-async function searchOnline({ source, query, mcVersion, loader, offset = 0, sort, limit = 20, anyVersion, type, server }) {
+let cfCategories = null;
+async function cfCategoryId(classId, want) {
+  cfCategories ||= (await getJSON(`${CF_BASE}/categories?gameId=432`, cfHeaders())).data;
+  const w = want.replace(/-/g, '');
+  const c = cfCategories.find(x => x.classId === classId && (x.slug.replace(/-/g, '').includes(w) || x.name.toLowerCase().replace(/[^a-z]/g, '').includes(w)));
+  return c?.id || null;
+}
+async function searchOnline({ source, query, mcVersion, loader, offset = 0, sort, limit = 20, anyVersion, type, server, category }) {
+  category = /^[a-z0-9-]{2,30}$/.test(category || '') ? category : null;
   type = typeOf(type);
   const pluginLoaders = ['paper', 'spigot', 'bukkit', 'purpur'];
   query = cleanQuery(query);
@@ -331,6 +358,7 @@ async function searchOnline({ source, query, mcVersion, loader, offset = 0, sort
     const p = new URLSearchParams({ gameId: '432', classId: String(TYPES[type].cf), searchFilter: query || '', index: String(offset), pageSize: String(Math.min(limit, 50)), sortField: sort === 'downloads' ? '6' : '2', sortOrder: 'desc' });
     if (mcVersion) p.set('gameVersion', mcVersion);
     if (CF_LOADER[loader]) p.set('modLoaderType', String(CF_LOADER[loader]));
+    if (category) { const cid = await cfCategoryId(TYPES[type].cf, category).catch(() => null); if (cid) p.set('categoryId', String(cid)); }
     const r = await getJSON(`${CF_BASE}/mods/search?${p}`, cfHeaders());
     return {
       total: r.pagination?.totalCount || 0,
@@ -347,6 +375,7 @@ async function searchOnline({ source, query, mcVersion, loader, offset = 0, sort
   // Modrinth (no key needed)
   const facets = [[`project_type:${TYPES[type].mr}`]];
   if (mcVersion) facets.push([`versions:${mcVersion}`]);
+  if (category) facets.push([`categories:${category}`]);
   if (type === 'plugin') facets.push(pluginLoaders.map(l => `categories:${l}`));
   else if (loader && loader !== 'vanilla') facets.push([`categories:${loader}`]);
   if (server && type === 'mod') facets.push(['server_side:required', 'server_side:optional']);
@@ -619,8 +648,19 @@ ipcMain.handle('mods:addFiles', async (_e, { instanceId, files }) => {
 ipcMain.handle('mods:remove', async (_e, { instanceId, file }) => {
   const inst = await readInstance(instanceId);
   const entry = inst.mods.find(m => m.file === file);
-  await fsp.rm(path.join(instDir(instanceId), TYPES[typeOf(entry?.type)].dir, path.basename(file)), { force: true });
+  const dir = path.join(instDir(instanceId), TYPES[typeOf(entry?.type)].dir || 'mods');
+  await fsp.rm(path.join(dir, path.basename(file)), { force: true });
+  await fsp.rm(path.join(dir, path.basename(file) + '.disabled'), { force: true });
   inst.mods = inst.mods.filter(m => m.file !== file);
+  return writeInstance(inst);
+});
+ipcMain.handle('mods:toggle', async (_e, { instanceId, file }) => {
+  const inst = await readInstance(instanceId);
+  const m = inst.mods.find(x => x.file === file); if (!m) throw new Error('Not found');
+  const dir = path.join(instDir(instanceId), TYPES[typeOf(m.type)].dir || 'mods');
+  const on = path.join(dir, path.basename(file)), off = on + '.disabled';
+  if (m.disabled) { if (fs.existsSync(off)) await fsp.rename(off, on); m.disabled = false; }
+  else { if (fs.existsSync(on)) await fsp.rename(on, off); m.disabled = true; }
   return writeInstance(inst);
 });
 
@@ -718,7 +758,9 @@ ipcMain.handle('game:launch', async (_e, id) => {
   }
   // Join a server straight away (used by the Servers tab)
   const join = joinNext.get(id); joinNext.delete(id);
-  const joinArgs = join ? (newerOrSame(inst.mcVersion, '1.20') ? { quickPlay: { type: 'multiplayer', identifier: join } } : { customLaunchArgs: ['--server', join.split(':')[0], '--port', join.split(':')[1] || '25565'] }) : {};
+  let joinArgs = {};
+  if (join?.type === 'singleplayer' && newerOrSame(inst.mcVersion, '1.20')) joinArgs = { quickPlay: { type: 'singleplayer', identifier: join.identifier } };
+  else if (join?.type === 'multiplayer') joinArgs = newerOrSame(inst.mcVersion, '1.20') ? { quickPlay: { type: 'multiplayer', identifier: join.identifier } } : { customLaunchArgs: ['--server', join.identifier.split(':')[0], '--port', join.identifier.split(':')[1] || '25565'] };
   const ram = Math.max(1024, Number(store.ramMB) || 4096);
   const launcher = new Client();
   launcher.on('progress', p => send('launch:status', { id, stage: `Downloading ${p.type}…`, pct: p.total ? p.task / p.total : 0 }));
@@ -793,7 +835,9 @@ function newerOrSame(v, min) {
   for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
   return true;
 }
-ipcMain.handle('game:join', (_e, { id, address }) => { joinNext.set(id, address); return true; });
+ipcMain.handle('game:join', (_e, { id, address }) => { joinNext.set(id, { type: 'multiplayer', identifier: String(address) }); return true; });
+// Quick Play: open straight into a world (Minecraft 1.20+)
+ipcMain.handle('game:quickplay', (_e, { id, world }) => { joinNext.set(id, { type: 'singleplayer', identifier: path.basename(String(world)) }); return true; });
 ipcMain.handle('game:stop', (_e, id) => { running.get(id)?.kill(); return true; });
 
 // ---------- friends: identity checks with Mojang ----------
@@ -1061,7 +1105,10 @@ async function startServer(id) {
       const text = chunk.toString();
       entry.log = (entry.log + text).slice(-300000);
       send('server:log', { id, text });
-      if (entry.status === 'starting' && /Done \([\d.,]+s\)!/.test(text)) { entry.started = Date.now(); status('running'); }
+      if (entry.status === 'starting' && /Done \([\d.,]+s\)!/.test(text)) {
+        entry.started = Date.now(); status('running');
+        for (const l of gameruleLines(s.mcVersion, s.gamerules)) proc.stdin.write(l + '\n');
+      }
       let changed = false;
       for (const m of text.matchAll(/\]: ([A-Za-z0-9_]{3,16}) joined the game/g)) { entry.players.add(m[1]); changed = true; }
       for (const m of text.matchAll(/\]: ([A-Za-z0-9_]{3,16}) (left the game|lost connection)/g)) { entry.players.delete(m[1]); changed = true; }
@@ -1362,9 +1409,10 @@ function buildModFiles(mod, mc) {
     const base = kind === 'material' || kind === 'block' ? matBase[iid] : KIND_BASE[kind] ? 'minecraft:' + KIND_BASE[kind] : kind === 'food' ? mcId(it.base || 'minecraft:apple') : mcId(it.base || 'minecraft:stick');
     const grid = (it.grid || []).slice(0, 9).map(ingredient);
     while (grid.length < 9) grid.push('');
+    const rtype = ['shaped', 'shapeless', 'smelting', 'blasting', 'smoking', 'campfire'].includes(it.recipeType) ? it.recipeType : 'shaped';
     let rows = [0, 1, 2].map(r => grid.slice(r * 3, r * 3 + 3));
     rows = rows.filter(r => r.some(Boolean));
-    if (!rows.length) throw new Error(`"${it.displayName || it.name}" needs a crafting recipe.`);
+    if (!rows.length) throw new Error(`"${it.displayName || it.name}" needs a recipe.`);
     const cols = [0, 1, 2].filter(c => rows.some(r => r[c]));
     rows = rows.map(r => cols.map(c => r[c]));
     const keyOf = {}, letters = 'ABCDEFGHI'.split('');
@@ -1440,10 +1488,19 @@ function buildModFiles(mod, mc) {
         (overrides[base] ||= []).push({ predicate: { custom_model_data: cmd }, model: `${modid}:item/${iid}` });
       }
     }
-    put(`data/${modid}/recipe/${iid}.json`, {
-      type: 'minecraft:crafting_shaped', category: kind === 'material' || kind === 'block' ? 'misc' : kind === 'food' ? 'misc' : 'equipment', pattern, key,
-      result: { id: base, count: Math.min(64, Math.max(1, Number(it.count) || 1)), components: comps },
-    });
+    const result = { id: base, count: Math.min(64, Math.max(1, Number(it.count) || 1)), components: comps };
+    const ing = x => newRecipes ? x : { item: x };
+    if (rtype === 'shapeless') {
+      put(`data/${modid}/recipe/${iid}.json`, { type: 'minecraft:crafting_shapeless', category: 'misc', ingredients: grid.filter(Boolean).map(ing), result });
+    } else if (rtype === 'shaped') {
+      put(`data/${modid}/recipe/${iid}.json`, { type: 'minecraft:crafting_shaped', category: kind === 'material' || kind === 'block' || kind === 'food' ? 'misc' : 'equipment', pattern, key, result });
+    } else {
+      // furnace-type recipes: the first item in the grid goes in, your item comes out
+      const input = grid.find(Boolean);
+      const secs = { smelting: 10, blasting: 5, smoking: 5, campfire: 30 }[rtype];
+      const cookSecs = Math.max(0.5, Math.min(600, Number(it.cookSeconds) || secs));
+      put(`data/${modid}/recipe/${iid}.json`, { type: `minecraft:${rtype === 'campfire' ? 'campfire_cooking' : rtype}`, category: kind === 'food' ? 'food' : 'misc', ingredient: ing(input), result, experience: Math.max(0, Math.min(100, Number(it.xp) || 1)), cookingtime: Math.round(cookSecs * 20) });
+    }
     compsOf[iid] = { base, comps };
     if (kind === 'block') {
       const bname = base.replace('minecraft:', '');
@@ -2201,7 +2258,7 @@ async function latestFor(inst, m) {
 }
 ipcMain.handle('mods:checkUpdates', async (_e, id) => {
   const inst = await readInstance(id);
-  const list = (inst.mods || []).filter(m => m.source === 'modrinth');
+  const list = (inst.mods || []).filter(m => m.source === 'modrinth' && !m.disabled);
   const out = [];
   await pool(list, 6, async m => {
     try { const v = await latestFor(inst, m); if (v && v.version_number !== m.version) out.push({ file: m.file, title: m.title, from: m.version, to: v.version_number, icon: m.icon }); } catch {}
@@ -2311,4 +2368,52 @@ ipcMain.handle('posts:deleteMedia', (_e, id) => fsp.rm(path.join(POSTS(), postId
 ipcMain.handle('files:pick', async (_e, { title, exts }) => {
   const r = await dialog.showOpenDialog(win, { title: title || 'Pick a file', properties: ['openFile'], filters: [{ name: 'Files', extensions: exts || ['jar', 'zip', 'mrpack'] }] });
   return r.canceled ? null : r.filePaths[0];
+});
+
+// ---------- game rules (instances: a small data pack added to every world; servers: commands) ----------
+const GAMERULES = { keepInventory: ['bool', '1.13'], doDaylightCycle: ['bool', '1.13'], doWeatherCycle: ['bool', '1.13'], doMobSpawning: ['bool', '1.13'], mobGriefing: ['bool', '1.13'], doFireTick: ['bool', '1.13'],
+  naturalRegeneration: ['bool', '1.13'], showDeathMessages: ['bool', '1.13'], announceAdvancements: ['bool', '1.13'], doInsomnia: ['bool', '1.15'], doImmediateRespawn: ['bool', '1.15'], fallDamage: ['bool', '1.15'],
+  fireDamage: ['bool', '1.15'], drowningDamage: ['bool', '1.15'], freezeDamage: ['bool', '1.17'], doPatrolSpawning: ['bool', '1.15'], doTraderSpawning: ['bool', '1.15'],
+  randomTickSpeed: ['int', '1.13', 0, 1000], spawnRadius: ['int', '1.13', 0, 100], playersSleepingPercentage: ['int', '1.17', 0, 100] };
+function gameruleLines(mc, rules) {
+  const out = [];
+  for (const [k, v] of Object.entries(rules || {})) {
+    const def = GAMERULES[k]; if (!def || v === '' || v === null || v === undefined || !newerOrSame(mc, def[1])) continue;
+    if (def[0] === 'bool') out.push(`gamerule ${k} ${v === true || v === 'true'}`);
+    else out.push(`gamerule ${k} ${Math.max(def[2], Math.min(def[3], Math.round(Number(v) || 0)))}`);
+  }
+  return out;
+}
+ipcMain.handle('gamerules:list', () => GAMERULES);
+ipcMain.handle('gamerules:setInstance', async (_e, { id, rules }) => {
+  const inst = await readInstance(id);
+  const lines = gameruleLines(inst.mcVersion, rules);
+  const file = path.join(instDir(id), 'datapacks', 'p1xel_gamerules.zip');
+  inst.gamerules = rules;
+  if (!lines.length) { await fsp.rm(file, { force: true }); }
+  else {
+    if (!newerOrSame(inst.mcVersion, '1.13')) throw new Error('Game rules need Minecraft 1.13 or newer.');
+    const plural = !newerOrSame(inst.mcVersion, '1.21');
+    const zip = new AdmZip();
+    zip.addFile('pack.mcmeta', Buffer.from(JSON.stringify({ pack: { pack_format: packFormat(inst.mcVersion), description: 'Game rules from P1xel Lab' } })));
+    zip.addFile(`data/p1xel_gamerules/${plural ? 'functions' : 'function'}/load.mcfunction`, Buffer.from(lines.join('\n') + '\n'));
+    zip.addFile(`data/minecraft/tags/${plural ? 'functions' : 'function'}/load.json`, Buffer.from(JSON.stringify({ values: ['p1xel_gamerules:load'] })));
+    await fsp.mkdir(path.dirname(file), { recursive: true });
+    await fsp.writeFile(file, zip.toBuffer());
+    // replace the old copy inside each world so changes apply
+    const saves = path.join(instDir(id), 'saves');
+    if (fs.existsSync(saves)) for (const w of await fsp.readdir(saves)) { const d = path.join(saves, w, 'datapacks', 'p1xel_gamerules.zip'); if (fs.existsSync(d)) await fsp.copyFile(file, d); }
+  }
+  if (!lines.length) { const saves = path.join(instDir(id), 'saves'); if (fs.existsSync(saves)) for (const w of await fsp.readdir(saves)) await fsp.rm(path.join(saves, w, 'datapacks', 'p1xel_gamerules.zip'), { force: true }); }
+  await writeInstance(inst);
+  return { instance: inst, applied: lines.length };
+});
+ipcMain.handle('gamerules:setServer', async (_e, { id, rules }) => {
+  const srv = await readServer(id);
+  srv.gamerules = rules;
+  await writeServer(srv);
+  const lines = gameruleLines(srv.mcVersion, rules);
+  const p = servers.get(id)?.proc;
+  if (p) for (const l of lines) p.stdin.write(l + '\n');
+  return { server: pub(srv), applied: lines.length, live: !!p };
 });

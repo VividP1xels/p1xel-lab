@@ -49,7 +49,7 @@ async function onSignedIn(user) {
   state.user = user;
   $('#acc-name').textContent = user.name; $('#acc-skin').src = user.skin; $('#tut-name').textContent = user.name;
   state.settings = await lab.getSettings();
-  applyTheme(state.settings.accent);
+  applyPreset(state.settings.themePreset); applyTheme(state.settings.accent);
   state.instances = await lab.listInstances();
   Social.start().then(() => Profile.renderAccount());
   Notes.start();
@@ -190,7 +190,7 @@ function renderSidebar() {
   $('#inst-list').innerHTML = state.instances.map(i => `
     <div class="inst-item ${state.current?.id === i.id ? 'active' : ''}" data-id="${esc(i.id)}">
       <span class="inst-icon">${Pixels.block(i.icon, 34)}</span>
-      <div><b>${esc(i.name)}</b><small>${esc(i.mcVersion)} · ${LOADER_NAME[i.loader] || i.loader}</small></div>
+      <div><b>${i.favorite ? '<i class="fav">★</i> ' : ''}${esc(i.name)}</b><small>${esc(i.mcVersion)} · ${LOADER_NAME[i.loader] || i.loader}</small></div>
     </div>`).join('');
 }
 $('#inst-list').onclick = e => { const it = e.target.closest('.inst-item'); if (it) selectInstance(it.dataset.id); };
@@ -204,6 +204,7 @@ async function selectInstance(id) {
   $('#empty-state').classList.add('hidden'); $('#inst-view').classList.remove('hidden');
   $('#iv-icon').innerHTML = Pixels.block(i.icon, 64);
   $('#iv-name').textContent = i.name;
+  updateFav(); updateQuick();
   $('#iv-ver').textContent = 'Minecraft ' + i.mcVersion;
   $('#iv-loader').textContent = LOADER_NAME[i.loader]; $('#iv-loader').className = 'tag ' + i.loader;
   updateCounts();
@@ -237,6 +238,11 @@ async function renderWorlds() {
     <div class="results">${list.length ? list.map(w => `<div class="mod world">${w.icon ? `<img src="${w.icon}" alt="">` : '<div class="noimg"></div>'}<div class="body"><h4>${esc(w.name)}</h4><span class="by">Last played ${new Date(w.played).toLocaleString()} · ${fmtBytes(w.size)}</span>
       <div class="foot"><button class="btn btn-ghost sm" data-wact="backup" data-w="${esc(w.name)}">💾 Back up</button><button class="btn btn-ghost sm" data-wact="open" data-w="${esc(w.name)}">📂 Folder</button><button class="btn btn-ghost sm danger" data-wact="delete" data-w="${esc(w.name)}">Delete</button></div></div></div>`).join('') : '<div class="loading">No worlds yet. Press Play and make one!</div>'}</div>`;
   $('#w-open').onclick = () => lab.worlds.open({ id });
+  box.insertAdjacentHTML('beforeend', '<div id="w-rules"></div>');
+  if (verGE(state.current.mcVersion, '1.13')) gameruleForm($('#w-rules'), state.current.gamerules || {}, state.current.mcVersion, async rules => {
+    try { const r = await lab.gamerules.setInstance({ id, rules }); state.current = r.instance; toast(r.applied ? `Saved ${r.applied} game rule${r.applied > 1 ? 's' : ''}. They apply to every world in this instance.` : 'Game rules reset to normal.', 'ok'); }
+    catch (e) { toast(errMsg(e), 'err'); }
+  }, 'These apply to <b>every world</b> in this instance the next time you play (or type <code>/reload</code> in a world).');
   box.querySelector('.results').onclick = async e => {
     const b = e.target.closest('[data-wact]'); if (!b) return;
     const name = b.dataset.w;
@@ -342,6 +348,8 @@ async function search(reset) {
   const i = state.current; if (!i) return;
   const seq = ++searchSeq;
   $('#m-query').placeholder = PLACEHOLDER[state.type];
+  if (!(CATS[state.type] || []).some(([k]) => k === state.cat) && state.cat !== 'horror') state.cat = '';
+  renderCats();
   $('#m-any').parentElement.classList.toggle('hidden', state.type === 'modpack');
   if (reset) { state.offset = 0; state.results = []; $('#results').innerHTML = '<div class="loading">Searching…</div>'; }
   const srcName = state.source === 'modrinth' ? 'Modrinth' : 'CurseForge';
@@ -356,7 +364,9 @@ async function search(reset) {
     let any = $('#m-any').checked;
     const type = state.type;
     if (type === 'modpack') any = false;
-    let r = await lab.searchMods({ source: state.source, query, mcVersion: i.mcVersion, loader: i.loader, offset: state.offset, sort: $('#m-sort').value, anyVersion: any, type });
+    const q2 = state.cat === 'horror' ? `${query} horror`.trim() : query;
+    const category = state.cat && state.cat !== 'horror' ? state.cat : undefined;
+    let r = await lab.searchMods({ source: state.source, query: q2, mcVersion: i.mcVersion, loader: i.loader, offset: state.offset, sort: $('#m-sort').value, anyVersion: any, type, category });
     // Nothing for this version? Look everywhere so you can see where the mod is available.
     if (reset && !any && query && !r.hits.length && !r.offline && type !== 'modpack') {
       const all = await lab.searchMods({ source: state.source, query, offset: 0, sort: $('#m-sort').value, anyVersion: true, type });
@@ -462,9 +472,10 @@ function renderInstalled() {
   const all = state.current.mods || [];
   const groups = ['mod', 'shader', 'resourcepack', 'datapack'].map(t => [t, all.filter(m => (m.type || 'mod') === t)]).filter(([, l]) => l.length);
   $('#installed-list').innerHTML = all.length ? groups.map(([t, mods]) => `<div class="f-sec">${TYPE_NAME[t]} · ${mods.length}</div>` + mods.map(m => `
-    <div class="mod">
+    <div class="mod ${m.disabled ? 'disabled' : ''}">
       ${m.icon ? `<img src="${esc(m.icon)}" alt="">` : '<div class="noimg"></div>'}
-      <div class="body"><h4>${esc(m.title)}</h4><span class="by">${esc(m.version)} · ${({ modrinth: 'from Modrinth', curseforge: 'from CurseForge', file: 'added from a file', maker: 'made with Mod Maker' })[m.source] || ''} · ${esc(m.file)}</span></div>
+      <label class="switch" title="${m.disabled ? 'Turned off. Click to turn on' : 'On. Click to turn off'}"><input type="checkbox" data-toggle="${esc(m.file)}" ${m.disabled ? '' : 'checked'}><i></i></label>
+      <div class="body"><h4>${esc(m.title)}${m.disabled ? ' <small class="off-tag">OFF</small>' : ''}</h4><span class="by">${esc(m.version)} · ${({ modrinth: 'from Modrinth', curseforge: 'from CurseForge', file: 'added from a file', maker: 'made with Mod Maker' })[m.source] || ''} · ${esc(m.file)}</span></div>
       <button class="btn btn-ghost danger" data-remove="${esc(m.file)}">Remove</button>
     </div>`).join('')).join('')
     : '<div class="loading">Nothing added yet. Head to <b>Browse</b> to add mods, shaders and packs!</div>';
@@ -490,6 +501,7 @@ window.addEventListener('drop', e => {
   const files = [...(e.dataTransfer?.files || [])].map(f => lab.filePath(f)).filter(Boolean);
   if (files.length) { setTab('installed'); addFiles(files); }
 });
+$('#installed-list').onchange = e => { const t = e.target.closest('[data-toggle]'); if (t) toggleMod(t.dataset.toggle); };
 $('#installed-list').onclick = async e => {
   const b = e.target.closest('[data-remove]'); if (!b) return;
   state.current = await lab.removeMod({ instanceId: state.current.id, file: b.dataset.remove });
@@ -586,10 +598,11 @@ function applyTheme(hex) {
   root.setProperty('--purple', hex);
 }
 ColorPicker.bind($('#s-theme'), () => state.settings.accent || '#a24bff', h => { applyTheme(h); state.settings.accent = h; lab.setSettings({ accent: h }); });
-$('#s-theme-reset').onclick = () => { applyTheme(''); state.settings.accent = ''; lab.setSettings({ accent: '' }); $('#s-theme').style.setProperty('--c', '#a24bff'); };
+$('#s-theme-reset').onclick = () => { state.settings.accent = ''; lab.setSettings({ accent: '' }); applyPreset(state.settings.themePreset); $('#s-theme').style.setProperty('--c', '#a24bff'); };
 $('#btn-settings').onclick = async () => {
   state.settings = await lab.getSettings();
   $('#s-theme').style.setProperty('--c', state.settings.accent || '#a24bff');
+  renderPresets();
   $('#s-ram').value = state.settings.ramMB; $('#ram-val').textContent = (state.settings.ramMB / 1024).toFixed(1) + ' GB';
   $('#s-java').value = state.settings.javaPath; $('#s-cf').value = '';
   $('#s-cf-state').textContent = state.settings.curseforgeKeySet ? '(saved ✓)' : '(not set)';
@@ -609,6 +622,93 @@ $('#settings').addEventListener('close', async () => {
 // Re-run the search when the Wi-Fi comes back or drops
 window.addEventListener('online', () => { if (state.current && !$('#inst-view').classList.contains('hidden')) search(true); });
 window.addEventListener('offline', () => { if (state.current && !$('#inst-view').classList.contains('hidden')) search(true); });
+
+
+// ========== 10 new features ==========
+// #2 favorites + #4 duplicate
+function updateFav() { const f = !!state.current?.favorite; $('#iv-fav').textContent = f ? '★' : '☆'; $('#iv-fav').classList.toggle('on', f); }
+$('#iv-fav').onclick = async () => {
+  state.current = await lab.updateInstance({ id: state.current.id, patch: { favorite: !state.current.favorite } });
+  state.instances = await lab.listInstances(); renderSidebar(); updateFav();
+  toast(state.current.favorite ? '⭐ Pinned to the top' : 'Unpinned');
+};
+$('#iv-dup').onclick = async () => {
+  try { const c = await lab.duplicateInstance(state.current.id); state.instances = await lab.listInstances(); toast(`Made a copy: ${c.name}`, 'ok'); selectInstance(c.id); }
+  catch (e) { toast(errMsg(e), 'err'); }
+};
+// #1 Quick Play
+const verGE = (v, min) => { const a = v.split('.').map(Number), b = min.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); return true; };
+async function updateQuick() {
+  const i = state.current, b = $('#iv-quick');
+  b.classList.add('hidden');
+  if (!i || !verGE(i.mcVersion, '1.20')) return;
+  const worlds = await lab.worlds.list(i.id).catch(() => []);
+  if (state.current?.id !== i.id || !worlds.length) return;
+  b.dataset.world = worlds[0].name; b.title = `Jump straight into "${worlds[0].name}"`;
+  b.textContent = `⚡ ${worlds[0].name.length > 14 ? worlds[0].name.slice(0, 13) + '…' : worlds[0].name}`;
+  b.classList.remove('hidden');
+}
+$('#iv-quick').onclick = async () => { await lab.quickPlay({ id: state.current.id, world: $('#iv-quick').dataset.world }); $('#iv-play').click(); };
+// #12 mods on/off
+async function toggleMod(file) { state.current = await lab.toggleMod({ instanceId: state.current.id, file }); renderInstalled(); }
+// #22 category filters
+const CATS = {
+  mod: [['adventure', '⚔ Adventure'], ['magic', '✨ Magic'], ['technology', '⚙ Tech'], ['mobs', '🐺 Mobs'], ['worldgen', '🌄 World gen'], ['decoration', '🪑 Decoration'], ['equipment', '🛡 Gear'], ['food', '🍗 Food'], ['storage', '📦 Storage'], ['optimization', '⚡ Performance'], ['utility', '🧰 Utility']],
+  shader: [['realistic', '📸 Realistic'], ['semi-realistic', '🌅 Semi-realistic'], ['vanilla-like', '🟩 Vanilla-like'], ['fantasy', '🧚 Fantasy'], ['cartoon', '🎨 Cartoon'], ['potato', '🥔 Low-end PCs']],
+  resourcepack: [['simplistic', '◻ Simple'], ['realistic', '📸 Realistic'], ['vanilla-like', '🟩 Vanilla-like'], ['themed', '🎭 Themed'], ['decoration', '🪑 Decoration'], ['combat', '⚔ PvP']],
+  datapack: [['adventure', '⚔ Adventure'], ['magic', '✨ Magic'], ['worldgen', '🌄 World gen'], ['mobs', '🐺 Mobs'], ['utility', '🧰 Utility'], ['decoration', '🪑 Decoration']],
+  modpack: [['adventure', '⚔ Adventure'], ['challenging', '💀 Hard'], ['kitchen-sink', '🧺 Kitchen sink'], ['lightweight', '🪶 Lightweight'], ['magic', '✨ Magic'], ['technology', '⚙ Tech'], ['quests', '📜 Quests'], ['multiplayer', '👥 Multiplayer']],
+};
+state.cat = '';
+function renderCats() {
+  const list = CATS[state.type] || [];
+  $('#cat-chips').innerHTML = [['', 'All'], ['horror', '👻 Horror'], ...list].map(([k, t]) => `<button class="chip ${state.cat === k ? 'on' : ''}" data-cat="${k}">${t}</button>`).join('');
+}
+$('#cat-chips').onclick = e => { const b = e.target.closest('[data-cat]'); if (!b) return; state.cat = b.dataset.cat; renderCats(); search(true); };
+// #86 theme presets
+const THEMES = {
+  purple: { name: '💜 P1xel (default)', vars: {} },
+  neon: { name: '🌈 Neon', vars: { '--purple': '#ff2bd6', '--cyan': '#00f0ff', '--bg': '#07060f', '--panel': '#110d22', '--panel2': '#1a1433', '--line': '#2e2357' } },
+  horror: { name: '👻 Horror', vars: { '--purple': '#c3122f', '--cyan': '#ff6b6b', '--bg': '#0a0505', '--panel': '#140a0a', '--panel2': '#1f1010', '--line': '#3a1a1a' } },
+  ocean: { name: '🌊 Ocean', vars: { '--purple': '#2b7bff', '--cyan': '#3ee6ff', '--bg': '#050b14', '--panel': '#0b1626', '--panel2': '#122236', '--line': '#1d3550' } },
+  forest: { name: '🌲 Forest', vars: { '--purple': '#2fa84f', '--cyan': '#b7f06a', '--bg': '#060c07', '--panel': '#0d170f', '--panel2': '#142319', '--line': '#21382a' } },
+  sunset: { name: '🌅 Sunset', vars: { '--purple': '#ff6a2b', '--cyan': '#ffd23e', '--bg': '#100806', '--panel': '#1c0f0b', '--panel2': '#281711', '--line': '#43271c' } },
+  void: { name: '🕳 Void', vars: { '--purple': '#7a2cff', '--cyan': '#c79bff', '--bg': '#030206', '--panel': '#0b0814', '--panel2': '#120d20', '--line': '#231a3a' } },
+};
+const THEME_KEYS = ['--purple', '--cyan', '--bg', '--panel', '--panel2', '--line'];
+function applyPreset(key) {
+  const root = document.documentElement.style;
+  THEME_KEYS.forEach(k => root.removeProperty(k));
+  for (const [k, v] of Object.entries((THEMES[key] || THEMES.purple).vars)) root.setProperty(k, v);
+  if (state.settings.accent) root.setProperty('--purple', state.settings.accent);
+}
+function renderPresets() {
+  $('#s-presets').innerHTML = Object.entries(THEMES).map(([k, t]) => `<button type="button" class="theme-pick ${state.settings.themePreset === k ? 'on' : ''}" data-theme="${k}" style="--a:${t.vars['--purple'] || '#a24bff'};--b:${t.vars['--bg'] || '#0d0b14'};--c2:${t.vars['--cyan'] || '#36f0e0'}"><i></i>${t.name}</button>`).join('');
+}
+$('#s-presets').onclick = e => {
+  const b = e.target.closest('[data-theme]'); if (!b) return;
+  state.settings.themePreset = b.dataset.theme; state.settings.accent = '';
+  lab.setSettings({ themePreset: b.dataset.theme, accent: '' }); applyPreset(b.dataset.theme); renderPresets();
+  $('#s-theme').style.setProperty('--c', THEMES[b.dataset.theme].vars['--purple'] || '#a24bff');
+};
+// #82 game rules
+const RULE_NAMES = { keepInventory: '🎒 Keep items when you die', doDaylightCycle: '☀ Day and night cycle', doWeatherCycle: '🌧 Weather changes', doMobSpawning: '🐺 Mobs spawn', mobGriefing: '💥 Mobs break blocks (creepers, endermen)', doFireTick: '🔥 Fire spreads',
+  naturalRegeneration: '❤ Health comes back on its own', showDeathMessages: '💀 Death messages', announceAdvancements: '🏆 Announce advancements', doInsomnia: '👻 Phantoms spawn', doImmediateRespawn: '⏩ Respawn instantly', fallDamage: '🪂 Fall damage',
+  fireDamage: '🔥 Fire damage', drowningDamage: '🌊 Drowning damage', freezeDamage: '🧊 Freeze damage', doPatrolSpawning: '🏹 Pillager patrols', doTraderSpawning: '🦙 Wandering trader',
+  randomTickSpeed: '🌱 Crop & plant growth speed (normal 3)', spawnRadius: '📍 Spawn area size (normal 10)', playersSleepingPercentage: '🛏 % of players who must sleep (normal 100)' };
+async function gameruleForm(box, current, mc, onSave, note) {
+  const defs = await lab.gamerules.list();
+  const fits = Object.entries(defs).filter(([, d]) => verGE(mc, d[1]));
+  box.innerHTML = `<div class="srv-card"><b>📜 Game rules</b><p class="fine">${note}</p>
+    <div class="rules">${fits.map(([k, d]) => `<label class="rule"><span>${RULE_NAMES[k] || k}</span>${d[0] === 'bool'
+      ? `<select data-rule="${k}"><option value="">Don't change</option><option value="true" ${current[k] === true || current[k] === 'true' ? 'selected' : ''}>On</option><option value="false" ${current[k] === false || current[k] === 'false' ? 'selected' : ''}>Off</option></select>`
+      : `<input type="number" data-rule="${k}" min="${d[2]}" max="${d[3]}" placeholder="Don't change" value="${current[k] ?? ''}">`}</label>`).join('')}</div>
+    <div class="dlg-row end"><button class="btn btn-ghost" data-rules-reset>Reset all</button><button class="btn btn-primary" data-rules-save>Save game rules</button></div></div>`;
+  const read = () => { const r = {}; box.querySelectorAll('[data-rule]').forEach(el => { if (el.value !== '') r[el.dataset.rule] = el.tagName === 'SELECT' ? el.value === 'true' : Number(el.value); }); return r; };
+  box.querySelector('[data-rules-save]').onclick = () => onSave(read());
+  box.querySelector('[data-rules-reset]').onclick = () => { box.querySelectorAll('[data-rule]').forEach(el => { el.value = ''; }); onSave({}); };
+}
+window.gameruleForm = gameruleForm;
 
 // ---------- boot ----------
 window.addEventListener('DOMContentLoaded', async () => {

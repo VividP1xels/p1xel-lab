@@ -130,7 +130,7 @@
         <header class="inst-head">
           <div class="inst-icon lg" id="iv-icon"></div>
           <div class="inst-meta">
-            <h2 id="iv-name"></h2>
+            <h2><span id="iv-name"></span> <button class="star" id="iv-fav" title="Favorite: pin to the top">☆</button><button class="icon-btn" id="iv-dup" title="Duplicate this instance">📋</button></h2>
             <div class="tags"><span class="tag" id="iv-ver"></span><span class="tag" id="iv-loader"></span><span class="tag" id="iv-count"></span><span class="tag" id="iv-time"></span></div>
           </div>
           <div class="inst-actions">
@@ -138,6 +138,7 @@
             <button class="btn btn-ghost" id="iv-via" title="Join servers running other Minecraft versions">🌐 Any Version</button>
             <button class="btn btn-ghost" id="iv-folder" title="Open folder">Open folder</button>
             <button class="btn btn-ghost danger" id="iv-delete">Delete</button>
+            <button class="btn btn-quick hidden" id="iv-quick" title="Jump straight into your last world">⚡ Quick Play</button>
             <button class="btn btn-play" id="iv-play">▶ PLAY</button>
           </div>
         </header>
@@ -167,6 +168,7 @@
             <input id="m-query" placeholder="Search mods… (e.g. sodium, jei, create)">
             <select id="m-sort"><option value="relevance">Relevance</option><option value="downloads">Most downloaded</option></select>
           </div>
+          <div class="chips cat-chips" id="cat-chips"></div>
           <div class="filter-row"><p class="filter-note" id="filter-note"></p><label class="check sm"><input type="checkbox" id="m-any"> Show results for every version &amp; loader</label></div>
           <div class="cf-key hidden" id="cf-key-box">
             <b>CurseForge needs an API key</b>
@@ -263,6 +265,7 @@
         <button class="btn btn-ghost" value="tutorial" id="s-tutorial">Replay tutorial</button>
         <button class="btn btn-ghost" id="s-update">Check for updates</button>
       </div>
+      <div class="field"><span>Theme</span><div class="theme-picks" id="s-presets"></div></div>
       <div class="field"><span>Launcher color</span><div class="row"><button type="button" class="cp-btn" id="s-theme" style="--c:#a24bff"><i></i>RGB</button><button class="btn btn-ghost" id="s-theme-reset" type="button">Default</button></div>
         <button class="btn btn-ghost danger" value="logout" id="s-logout">Sign out</button>
       </div>

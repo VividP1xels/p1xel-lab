@@ -336,7 +336,11 @@
           <div class="row"><button class="btn btn-ghost" id="st-folder">Open folder</button><button class="btn btn-ghost danger" id="st-del" ${s.status === 'stopped' ? '' : 'disabled'}>Delete server</button></div>
         </div>
       </div>
-      <div class="dlg-row end"><span class="fine" id="st-saved"></span><button class="btn btn-primary" id="st-save">Save settings</button></div>`;
+      <div class="dlg-row end"><span class="fine" id="st-saved"></span><button class="btn btn-primary" id="st-save">Save settings</button></div>
+      <div id="st-rules"></div>`;
+    gameruleForm($('#st-rules'), s.gamerules || {}, s.mcVersion, async rules => {
+      try { const r = await lab.gamerules.setServer({ id: s.id, rules }); Object.assign(s, r.server); toast(r.live ? 'Game rules applied now!' : 'Saved! They apply when the server starts.', 'ok'); } catch (e) { toast(errMsg(e), 'err'); }
+    }, 'Applied every time the server starts, and right away if it\'s running.');
     const tab = $('#sv-tab');
     tab.oninput = e => { const k = e.target.dataset.prop; if (k) { p[k] = e.target.type === 'checkbox' ? String(e.target.checked) : e.target.value; $('#st-saved').textContent = 'Unsaved changes'; } };
     $('#st-icons').onclick = async e => {
