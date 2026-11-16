@@ -21,6 +21,7 @@ jobs:
           - os: ubuntu-latest
             args: --linux
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -65,4 +66,9 @@ jobs:
           - **Linux:** P1xel-Lab-Linux.AppImage (any distro: make it executable, then run it) or P1xel-Lab-Linux.deb (Ubuntu/Debian)
           NOTES
           gh release delete latest --yes --cleanup-tag || true
-          gh release create "v$VERSION" out/* --title "P1xel Lab v$VERSION" --notes-file notes.txt --latest
+          # If this version already exists (a re-run), just add or replace the files
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" out/* --clobber
+          else
+            gh release create "v$VERSION" out/* --title "P1xel Lab v$VERSION" --notes-file notes.txt --latest
+          fi
