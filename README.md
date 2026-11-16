@@ -17,6 +17,9 @@ A Minecraft: Java Edition launcher built for modding, by **[VividP1xels](https:/
 11. **Mod Maker.** Make a real mod with no coding: custom crafted items with their own name, color, enchantments, damage and glow, a starter kit, keep inventory, night vision, a welcome message and **spooky nights**. Draw a pixel icon, then add it to an instance or export the `.jar`. Works on Fabric/Quilt for Minecraft 1.21 to 1.21.4.
 12. **⚡ Speed Boost.** One click adds ModernFix, FerriteCore, Sodium (or Embeddium), Lithium, ImmediatelyFast and Entity Culling. They make Minecraft start faster, use less memory and run at a higher FPS. It's on by default for new modded instances. Game files also download 32 at a time instead of 2, and Java uses settings tuned for Minecraft.
 
+13. **Shaders, resource packs, data packs and modpacks.** The Browse tab has a tab for each type, from both Modrinth and CurseForge. Shaders add Iris (or Oculus on Forge) for you. Data packs are added to every world in the instance when you press Play. Modpacks install as a new instance with the right Minecraft version, loader and files. You can also import a `.mrpack` or CurseForge modpack `.zip` from the New instance screen.
+14. **Publish.** Share things you made: a Mod Maker mod or your own `.jar`, any instance as a modpack (`.mrpack`), a resource pack, a Mod Maker data pack or your own, or a shader. Save the file to share anywhere, or publish it on Modrinth with your own Modrinth token. It's uploaded as a draft, and you click **Submit for review** on Modrinth. CurseForge only allows new projects on its website, so save the file and upload it there.
+
 ## How friends work
 
 - Launchers connect to each other directly (peer-to-peer) using [PeerJS](https://peerjs.com)'s free public connection service, so there's no server to run.

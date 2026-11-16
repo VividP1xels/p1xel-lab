@@ -6,7 +6,12 @@ const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).to
 const YT = 'https://www.youtube.com/@VividP1xels';
 const LOADER_NAME = { fabric: 'Fabric', quilt: 'Quilt', forge: 'Forge', neoforge: 'NeoForge', vanilla: 'Vanilla' };
 
-const state = { user: null, settings: {}, instances: [], current: null, source: 'modrinth', results: [], offset: 0, total: 0, firstRun: false };
+const state = { user: null, settings: {}, instances: [], current: null, source: 'modrinth', type: 'mod', results: [], offset: 0, total: 0, firstRun: false };
+const TYPE_NAME = { mod: 'mods', shader: 'shaders', resourcepack: 'resource packs', datapack: 'data packs', modpack: 'modpacks' };
+const TYPE_ONE = { mod: 'Mod', shader: 'Shader', resourcepack: 'Resource pack', datapack: 'Data pack', modpack: 'Modpack' };
+const PLACEHOLDER = { mod: 'Search mods… (e.g. sodium, jei, create)', shader: 'Search shaders… (e.g. complementary, bsl)', resourcepack: 'Search resource packs… (e.g. faithful, fresh animations)', datapack: 'Search data packs… (e.g. vanilla tweaks, terralith)', modpack: 'Search modpacks… (e.g. horror, skyblock, create)' };
+// Which kinds of things an instance can use
+const typesFor = inst => inst.loader === 'vanilla' ? ['resourcepack', 'datapack', 'modpack'] : ['mod', 'shader', 'resourcepack', 'datapack', 'modpack'];
 
 function toast(msg, kind = '') {
   const t = document.createElement('div');
@@ -155,7 +160,7 @@ $('#btn-new').onclick = () => openCreate(false);
 $('#empty-new').onclick = () => openCreate(false);
 
 // ---------- views (instance / friends / servers / mod maker) ----------
-const VIEWS = ['inst-view', 'empty-state', 'friends-view', 'servers-view', 'maker-view'];
+const VIEWS = ['inst-view', 'empty-state', 'friends-view', 'servers-view', 'maker-view', 'publish-view'];
 function showView(v) {
   if (v !== 'friends') Social.close();
   VIEWS.forEach(id => $('#' + id).classList.add('hidden'));
@@ -164,7 +169,9 @@ function showView(v) {
   $('#' + v + '-view').classList.remove('hidden');
   if (v === 'servers') Servers.open();
   if (v === 'maker') Maker.open();
+  if (v === 'publish') Publish.open();
 }
+$('#nav-publish').onclick = () => showView('publish');
 $('#nav-servers').onclick = () => showView('servers');
 $('#nav-maker').onclick = () => showView('maker');
 
@@ -187,7 +194,7 @@ $('#inst-list').onclick = e => { const it = e.target.closest('.inst-item'); if (
 async function selectInstance(id) {
   Social.close();
   $$('.nav-btn[data-view]').forEach(b => b.classList.remove('active'));
-  $('#servers-view').classList.add('hidden'); $('#maker-view').classList.add('hidden');
+  $('#servers-view').classList.add('hidden'); $('#maker-view').classList.add('hidden'); $('#publish-view').classList.add('hidden');
   state.current = await lab.getInstance(id);
   const i = state.current;
   $('#empty-state').classList.add('hidden'); $('#inst-view').classList.remove('hidden');
@@ -199,17 +206,20 @@ async function selectInstance(id) {
   updateBoost();
   renderSidebar();
   const vanilla = i.loader === 'vanilla';
-  $('.tab[data-tab=browse]').classList.toggle('hidden', vanilla);
-  $('.tab[data-tab=installed]').classList.toggle('hidden', vanilla);
-  setTab(vanilla ? 'log' : 'browse');
-  if (!vanilla) { search(true); if (navigator.onLine) lab.prefetchMods({ mcVersion: i.mcVersion, loader: i.loader }).catch(() => {}); }
+  const allowed = typesFor(i);
+  if (!allowed.includes(state.type)) state.type = allowed[0];
+  $$('#type-chips [data-type]').forEach(b => { b.classList.toggle('hidden', !allowed.includes(b.dataset.type)); b.classList.toggle('active', b.dataset.type === state.type); });
+  setTab('browse');
+  search(true);
+  if (!vanilla && navigator.onLine) lab.prefetchMods({ mcVersion: i.mcVersion, loader: i.loader }).catch(() => {});
   $('#log').textContent = logs[id] || 'Press Play and the game output will show up here.';
   setPlayState(launchState[id]);
 }
 function updateCounts() {
-  const n = state.current.mods?.length || 0;
+  const all = state.current.mods || [];
+  const n = all.filter(m => (m.type || 'mod') === 'mod').length;
   $('#iv-count').textContent = `${n} mod${n === 1 ? '' : 's'}`;
-  $('#tab-count').textContent = n ? `(${n})` : '';
+  $('#tab-count').textContent = all.length ? `(${all.length})` : '';
   $('#iv-count').classList.toggle('hidden', state.current.loader === 'vanilla');
 }
 function setTab(t) {
@@ -230,6 +240,31 @@ let debounce;
 $('#m-query').oninput = () => { clearTimeout(debounce); debounce = setTimeout(() => search(true), 350); };
 $('#m-sort').onchange = () => search(true);
 $('#m-any').onchange = () => search(true);
+$('#type-chips').onclick = e => {
+  const b = e.target.closest('[data-type]'); if (!b || b.classList.contains('active')) return;
+  state.type = b.dataset.type;
+  $$('#type-chips [data-type]').forEach(x => x.classList.toggle('active', x === b));
+  search(true);
+};
+// ---------- modpacks ----------
+async function installPack(run, label) {
+  $('#pack-bar').classList.remove('hidden'); $('#pack-title').textContent = label; $('#pack-stage').textContent = 'Starting…'; $('#pack-pct').style.width = '0';
+  try {
+    const r = await run();
+    if (!r) return;
+    state.instances = await lab.listInstances();
+    toast(`📦 ${r.instance.name} is ready!${r.skipped ? ` (${r.skipped} file${r.skipped > 1 ? 's' : ''} need downloading from CurseForge's page)` : ''}`, 'ok');
+    Notes.add({ kind: 'mod', title: `Installed modpack ${r.instance.name}`, body: `Minecraft ${r.instance.mcVersion} · ${LOADER_NAME[r.instance.loader]} · ${r.instance.mods.length} files`, action: { type: 'instance', id: r.instance.id } });
+    openMain(r.instance.id);
+  } catch (e) { toast(errMsg(e), 'err'); }
+  finally { $('#pack-bar').classList.add('hidden'); }
+}
+lab.onModpackProgress(p => {
+  if (!p) return;
+  $('#pack-stage').textContent = p.total > 1 ? `${p.stage}: ${p.done}/${p.total}` : p.stage;
+  $('#pack-pct').style.width = `${Math.round((p.total ? p.done / p.total : 0) * 100)}%`;
+});
+$('#c-import').onclick = () => installPack(() => lab.importModpack(), 'Importing modpack…');
 $('#m-more').onclick = () => search(false);
 $('#cf-key-save').onclick = async () => {
   const k = $('#cf-key-input').value.trim(); if (!k) return;
@@ -239,18 +274,27 @@ $('#cf-key-save').onclick = async () => {
 
 let searchSeq = 0;
 async function search(reset) {
-  const i = state.current; if (!i || i.loader === 'vanilla') return;
+  const i = state.current; if (!i) return;
   const seq = ++searchSeq;
+  $('#m-query').placeholder = PLACEHOLDER[state.type];
+  $('#m-any').parentElement.classList.toggle('hidden', state.type === 'modpack');
   if (reset) { state.offset = 0; state.results = []; $('#results').innerHTML = '<div class="loading">Searching…</div>'; }
-  $('#filter-note').innerHTML = `Showing <b>${state.source === 'modrinth' ? 'Modrinth' : 'CurseForge'}</b> mods that work with <b>Minecraft ${esc(i.mcVersion)}</b> + <b>${LOADER_NAME[i.loader]}</b>`;
+  const srcName = state.source === 'modrinth' ? 'Modrinth' : 'CurseForge';
+  $('#filter-note').innerHTML = state.type === 'modpack'
+    ? `Showing <b>${srcName}</b> modpacks. Installing one makes a <b>new instance</b> with everything set up.`
+    : state.type === 'mod'
+      ? `Showing <b>${srcName}</b> mods that work with <b>Minecraft ${esc(i.mcVersion)}</b> + <b>${LOADER_NAME[i.loader]}</b>`
+      : `Showing <b>${srcName}</b> ${TYPE_NAME[state.type]} for <b>Minecraft ${esc(i.mcVersion)}</b>${state.type === 'datapack' ? '. They get added to every world in this instance.' : state.type === 'shader' ? '. Iris (the shader mod) is added for you.' : ''}`;
   $('#cf-key-box').classList.add('hidden');
   try {
     const query = $('#m-query').value.trim();
     let any = $('#m-any').checked;
-    let r = await lab.searchMods({ source: state.source, query, mcVersion: i.mcVersion, loader: i.loader, offset: state.offset, sort: $('#m-sort').value, anyVersion: any });
+    const type = state.type;
+    if (type === 'modpack') any = false;
+    let r = await lab.searchMods({ source: state.source, query, mcVersion: i.mcVersion, loader: i.loader, offset: state.offset, sort: $('#m-sort').value, anyVersion: any, type });
     // Nothing for this version? Look everywhere so you can see where the mod is available.
-    if (reset && !any && query && !r.hits.length && !r.offline) {
-      const all = await lab.searchMods({ source: state.source, query, offset: 0, sort: $('#m-sort').value, anyVersion: true });
+    if (reset && !any && query && !r.hits.length && !r.offline && type !== 'modpack') {
+      const all = await lab.searchMods({ source: state.source, query, offset: 0, sort: $('#m-sort').value, anyVersion: true, type });
       if (all.hits.length) { r = all; any = true; state.autoAny = true; }
     } else if (reset) state.autoAny = false;
     state.any = any;
@@ -272,7 +316,8 @@ async function search(reset) {
 }
 const isInstalled = h => state.current.mods?.some(m => m.source === h.source && m.projectId === h.id);
 function fits(h, inst = state.current) {
-  if (!state.any) return true;
+  if (!state.any || h.type === 'modpack') return true;
+  if (h.type && h.type !== 'mod') return !h.gameVersions?.length || h.gameVersions.includes(inst.mcVersion) || h.type === 'shader';
   const okVer = !h.gameVersions?.length || h.gameVersions.includes(inst.mcVersion);
   const okLoader = !h.loaders?.length || h.loaders.includes(inst.loader) || (inst.loader === 'quilt' && h.loaders.includes('fabric'));
   return okVer && okLoader;
@@ -296,6 +341,7 @@ function renderResults() {
           ${isInstalled(h) ? '<button class="btn ok" disabled>✓ Installed</button>'
             : state.offline ? '<button class="btn" disabled title="Connect to the internet to install">Needs internet</button>'
             : !fits(h) ? `<button class="btn btn-ghost" data-newinst="${idx}" title="Make a new instance this mod works in">Make instance for it</button>`
+            : h.type === 'modpack' ? `<button class="btn btn-primary" data-pack="${idx}">Install as new instance</button>`
             : `<button class="btn btn-primary" data-install="${idx}">Install</button>`}
         </div>
       </div>
@@ -314,18 +360,23 @@ function showModDetails(h) {
   const go = $('#md-install');
   go.disabled = installed || state.offline;
   go.textContent = installed ? '✓ Installed' : state.offline ? 'Needs internet' : 'Install';
-  go.onclick = () => { $('#mod-dlg').close(); $(`#results [data-install="${state.results.indexOf(h)}"]`)?.click(); };
+  if (h.type === 'modpack') go.textContent = 'Install as new instance';
+  go.onclick = () => { $('#mod-dlg').close(); $(`#results [data-install="${state.results.indexOf(h)}"], #results [data-pack="${state.results.indexOf(h)}"]`)?.click(); };
   $('#mod-dlg').showModal();
 }
 $('#results').onclick = async e => {
   const d = e.target.closest('[data-detail]'); if (d) return showModDetails(state.results[+d.dataset.detail]);
+  const pk = e.target.closest('[data-pack]');
+  if (pk) { const h = state.results[+pk.dataset.pack]; pk.disabled = true; pk.textContent = 'Installing…'; return installPack(() => lab.installModpack({ source: h.source, projectId: h.id, title: h.title, icon: h.icon }), `Installing ${h.title}…`).finally(() => { pk.disabled = false; pk.textContent = 'Install as new instance'; }); }
   const ni = e.target.closest('[data-newinst]');
   if (ni) { const h = state.results[+ni.dataset.newinst]; const sg = suggestFor(h); return openCreate(false, { name: h.title, ...sg, mod: h }); }
   const b = e.target.closest('[data-install]'); if (!b) return;
   const h = state.results[+b.dataset.install];
   b.disabled = true; b.textContent = 'Installing…';
   try {
-    const r = await lab.installMod({ instanceId: state.current.id, source: h.source, projectId: h.id });
+    const r = await lab.installMod({ instanceId: state.current.id, source: h.source, projectId: h.id, type: h.type || 'mod' });
+    if (h.type === 'shader') toast('In Minecraft: Options → Video Settings → Shader Packs, then pick it! ✨');
+    if (h.type === 'datapack') toast('This data pack will be added to every world in this instance when you press Play.');
     state.current = r.instance; updateCounts();
     const deps = r.added.slice(1).map(a => a.title);
     toast(r.added.length ? `Installed ${h.title}${deps.length ? ` + ${deps.join(', ')}` : ''}` : `${h.title} is already installed`, 'ok');
@@ -343,14 +394,15 @@ lab.onModProgress(p => {
 });
 
 function renderInstalled() {
-  const mods = state.current.mods || [];
-  $('#installed-list').innerHTML = mods.length ? mods.map(m => `
+  const all = state.current.mods || [];
+  const groups = ['mod', 'shader', 'resourcepack', 'datapack'].map(t => [t, all.filter(m => (m.type || 'mod') === t)]).filter(([, l]) => l.length);
+  $('#installed-list').innerHTML = all.length ? groups.map(([t, mods]) => `<div class="f-sec">${TYPE_NAME[t]} · ${mods.length}</div>` + mods.map(m => `
     <div class="mod">
       ${m.icon ? `<img src="${esc(m.icon)}" alt="">` : '<div class="noimg"></div>'}
       <div class="body"><h4>${esc(m.title)}</h4><span class="by">${esc(m.version)} · ${({ modrinth: 'from Modrinth', curseforge: 'from CurseForge', file: 'added from a file', maker: 'made with Mod Maker' })[m.source] || ''} · ${esc(m.file)}</span></div>
       <button class="btn btn-ghost danger" data-remove="${esc(m.file)}">Remove</button>
-    </div>`).join('')
-    : '<div class="loading">No mods yet. Head to <b>Browse mods</b> to add some!</div>';
+    </div>`).join('')).join('')
+    : '<div class="loading">Nothing added yet. Head to <b>Browse</b> to add mods, shaders and packs!</div>';
 }
 async function addFiles(files) {
   if (!state.current) return;

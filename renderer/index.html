@@ -69,7 +69,8 @@
 
       <label class="toggle boost-toggle" id="c-boost-wrap"><input type="checkbox" id="c-boost" checked><span><b>⚡ Speed Boost (recommended)</b><small>Adds ModernFix, FerriteCore, Sodium and friends: Minecraft starts much faster, uses less memory and gets way more FPS.</small></span></label>
 
-      <button class="btn btn-primary big" id="c-create">Create instance</button>
+      <div class="create-row"><button class="btn btn-primary big" id="c-create">Create instance</button>
+      <button class="btn btn-ghost" id="c-import">📦 Import a modpack file</button></div>
     </div>
   </section>
 
@@ -90,6 +91,10 @@
       <button class="nav-btn" id="nav-servers" data-view="servers">
         <svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges"><path fill="currentColor" d="M2 2h12v5H2zM2 9h12v5H2z"/><path fill="#0d0b14" d="M4 4h1v1H4zM4 11h1v1H4zM7 4h5v1H7zM7 11h5v1H7z"/></svg>
         Servers <small id="servers-running"></small>
+      </button>
+      <button class="nav-btn" id="nav-publish" data-view="publish">
+        <svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges"><path fill="currentColor" d="M7 1h2v1h1v1h1v1h1v1H9v6H7V5H4V4h1V3h1V2h1zM2 10h2v3h8v-3h2v5H2z"/></svg>
+        Publish
       </button>
       <button class="nav-btn" id="nav-maker" data-view="maker">
         <svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges"><path fill="currentColor" d="M10 1h3v1h1v3h-1v1h-1v1h-1v1h-1v1H9v1H8v1H7v1H6v1H5v1H4v1H1v-3h1v-1h1v-1h1V9h1V8h1V7h1V6h1V5h1V4h1V3h1V2h1z"/></svg>
@@ -134,12 +139,19 @@
         <div class="launch-bar hidden" id="launch-bar"><span id="launch-text"></span><div class="bar"><i id="launch-pct"></i></div></div>
 
         <div class="tabs">
-          <button class="tab active" data-tab="browse">Browse mods</button>
+          <button class="tab active" data-tab="browse">Browse</button>
           <button class="tab" data-tab="installed">Installed <span id="tab-count"></span></button>
           <button class="tab" data-tab="log">Game log</button>
         </div>
 
         <div class="tab-body" id="tab-browse">
+          <div class="type-chips" id="type-chips">
+            <button data-type="mod" class="active">🧩 Mods</button>
+            <button data-type="shader">✨ Shaders</button>
+            <button data-type="resourcepack">🎨 Resource Packs</button>
+            <button data-type="datapack">📜 Data Packs</button>
+            <button data-type="modpack">📦 Modpacks</button>
+          </div>
           <div class="search-row">
             <div class="source-toggle" id="src-toggle">
               <button class="active" data-src="modrinth"><i class="dot mr"></i>Modrinth</button>
@@ -148,7 +160,7 @@
             <input id="m-query" placeholder="Search mods… (e.g. sodium, jei, create)">
             <select id="m-sort"><option value="relevance">Relevance</option><option value="downloads">Most downloaded</option></select>
           </div>
-          <div class="filter-row"><p class="filter-note" id="filter-note"></p><label class="check sm"><input type="checkbox" id="m-any"> Show mods for every version &amp; loader</label></div>
+          <div class="filter-row"><p class="filter-note" id="filter-note"></p><label class="check sm"><input type="checkbox" id="m-any"> Show results for every version &amp; loader</label></div>
           <div class="cf-key hidden" id="cf-key-box">
             <b>CurseForge needs an API key</b>
             <p>CurseForge requires every launcher to use its own free key. Get one at <a href="#" data-url="https://console.curseforge.com/">console.curseforge.com</a>, then paste it here.</p>
@@ -166,6 +178,7 @@
       </div>
       <div id="servers-view" class="hidden"></div>
       <div id="maker-view" class="hidden"></div>
+      <div id="publish-view" class="hidden"></div>
       <div id="friends-view" class="hidden">
         <div class="friends">
           <div class="f-left">
@@ -244,6 +257,7 @@
   </dialog>
 
   <div class="drop-hint hidden" id="drop-hint"><div>Drop .jar files to add them to <b id="drop-inst"></b></div></div>
+  <div class="pack-bar hidden" id="pack-bar"><b id="pack-title">Installing modpack…</b><span id="pack-stage"></span><div class="bar"><i id="pack-pct"></i></div></div>
   <div class="toast-host" id="toasts"></div>
   <script src="pixels.js"></script>
   <script src="vendor/peerjs.min.js"></script>
@@ -252,5 +266,6 @@
   <script src="social.js"></script>
   <script src="servers.js"></script>
   <script src="maker.js"></script>
+  <script src="publish.js"></script>
 </body>
 </html>

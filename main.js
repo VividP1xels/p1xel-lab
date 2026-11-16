@@ -214,17 +214,17 @@ async function neoforgeVersion(mc) {
   const list = neoVersions.filter(v => v.startsWith(prefix));
   return list.filter(v => !/beta|alpha/.test(v)).pop() || list.pop() || null;
 }
-async function ensureForgeInstaller(loader, mc) {
+async function ensureForgeInstaller(loader, mc, pinned) {
   const dir = path.join(MC_ROOT(), 'installers');
   await fsp.mkdir(dir, { recursive: true });
   let v, url, file;
   try {
     if (loader === 'forge') {
-      v = await forgeVersion(mc); if (!v) throw new Error(`Forge isn't available for ${mc}.`);
+      v = pinned || await forgeVersion(mc); if (!v) throw new Error(`Forge isn't available for ${mc}.`);
       file = path.join(dir, `forge-${mc}-${v}-installer.jar`);
       url = `https://maven.minecraftforge.net/net/minecraftforge/forge/${mc}-${v}/forge-${mc}-${v}-installer.jar`;
     } else {
-      v = await neoforgeVersion(mc); if (!v) throw new Error(`NeoForge isn't available for ${mc}.`);
+      v = pinned || await neoforgeVersion(mc); if (!v) throw new Error(`NeoForge isn't available for ${mc}.`);
       file = path.join(dir, `neoforge-${v}-installer.jar`);
       url = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${v}/neoforge-${v}-installer.jar`;
     }
@@ -278,6 +278,16 @@ const cfHeaders = () => {
   return { 'x-api-key': key };
 };
 
+// Everything you can browse: where it goes in the instance, and its id on Modrinth / CurseForge
+const TYPES = {
+  mod: { dir: 'mods', mr: 'mod', cf: 6, ext: /\.jar$/i },
+  shader: { dir: 'shaderpacks', mr: 'shader', cf: 6552, ext: /\.zip$/i },
+  resourcepack: { dir: 'resourcepacks', mr: 'resourcepack', cf: 12, ext: /\.zip$/i },
+  datapack: { dir: 'datapacks', mr: 'datapack', cf: 6945, ext: /\.zip$/i },
+  modpack: { dir: null, mr: 'modpack', cf: 4471, ext: /\.(mrpack|zip)$/i },
+};
+const typeOf = t => TYPES[t] ? t : 'mod';
+const usesLoader = t => t === 'mod' || t === 'modpack';
 // "wonderland.jar", "Wonderland-1.20.1-forge-2.3.jar" -> "wonderland"
 function cleanQuery(q) {
   return String(q || '')
@@ -292,18 +302,20 @@ function cleanQuery(q) {
 const OUR_LOADERS = ['fabric', 'quilt', 'forge', 'neoforge'];
 const CF_LOADER_NAME = { 1: 'forge', 4: 'fabric', 5: 'quilt', 6: 'neoforge' };
 const byVersionDesc = (a, b) => (newerOrSame(a, b) ? (a === b ? 0 : -1) : 1);
-async function searchOnline({ source, query, mcVersion, loader, offset = 0, sort, limit = 20, anyVersion }) {
+async function searchOnline({ source, query, mcVersion, loader, offset = 0, sort, limit = 20, anyVersion, type }) {
+  type = typeOf(type);
   query = cleanQuery(query);
-  if (anyVersion) { mcVersion = null; loader = null; }
+  if (anyVersion || type === 'modpack') { mcVersion = null; loader = null; }
+  if (!usesLoader(type)) loader = null;
   if (source === 'curseforge') {
-    const p = new URLSearchParams({ gameId: '432', classId: '6', searchFilter: query || '', index: String(offset), pageSize: String(Math.min(limit, 50)), sortField: sort === 'downloads' ? '6' : '2', sortOrder: 'desc' });
+    const p = new URLSearchParams({ gameId: '432', classId: String(TYPES[type].cf), searchFilter: query || '', index: String(offset), pageSize: String(Math.min(limit, 50)), sortField: sort === 'downloads' ? '6' : '2', sortOrder: 'desc' });
     if (mcVersion) p.set('gameVersion', mcVersion);
     if (CF_LOADER[loader]) p.set('modLoaderType', String(CF_LOADER[loader]));
     const r = await getJSON(`${CF_BASE}/mods/search?${p}`, cfHeaders());
     return {
       total: r.pagination?.totalCount || 0,
       hits: r.data.map(m => ({
-        source: 'curseforge', id: String(m.id), slug: m.slug, title: m.name, description: m.summary,
+        source: 'curseforge', id: String(m.id), slug: m.slug, title: m.name, description: m.summary, type,
         author: m.authors?.[0]?.name || 'Unknown', downloads: m.downloadCount, icon: m.logo?.thumbnailUrl || '',
         url: m.links?.websiteUrl || `https://www.curseforge.com/minecraft/mc-mods/${m.slug}`,
         categories: (m.categories || []).map(c => c.name).slice(0, 3),
@@ -313,7 +325,7 @@ async function searchOnline({ source, query, mcVersion, loader, offset = 0, sort
     };
   }
   // Modrinth (no key needed)
-  const facets = [['project_type:mod']];
+  const facets = [[`project_type:${TYPES[type].mr}`]];
   if (mcVersion) facets.push([`versions:${mcVersion}`]);
   if (loader && loader !== 'vanilla') facets.push([`categories:${loader}`]);
   const p = new URLSearchParams({ query: query || '', limit: String(limit), offset: String(offset), index: sort === 'downloads' ? 'downloads' : 'relevance', facets: JSON.stringify(facets) });
@@ -323,7 +335,7 @@ async function searchOnline({ source, query, mcVersion, loader, offset = 0, sort
     hits: r.hits.map(h => ({
       source: 'modrinth', id: h.project_id, slug: h.slug, title: h.title, description: h.description,
       author: h.author, downloads: h.downloads, icon: h.icon_url || '',
-      url: `https://modrinth.com/mod/${h.slug}`,
+      url: `https://modrinth.com/${TYPES[type].mr}/${h.slug}`, type,
       categories: (h.display_categories || h.categories || []).filter(c => !['fabric', 'forge', 'quilt', 'neoforge'].includes(c)).slice(0, 3),
       gameVersions: (h.versions || []).filter(v => /^1\.\d+(\.\d+)?$/.test(v)).sort(byVersionDesc),
       loaders: (h.categories || []).filter(c => OUR_LOADERS.includes(c)),
@@ -335,7 +347,7 @@ async function searchOnline({ source, query, mcVersion, loader, offset = 0, sort
 // Every mod you see online is saved (with its icon) so you can keep browsing with no internet.
 let catalog = null, catalogTimer;
 const CATALOG_FILE = () => path.join(CACHE(), 'mod-catalog.json');
-const catKey = (source, mcVersion, loader) => `${source}|${mcVersion}|${loader}`;
+const catKey = (source, mcVersion, loader, type = 'mod') => `${source}|${mcVersion}|${loader}${type === 'mod' ? '' : '|' + type}`;
 function loadCatalog() {
   if (!catalog) { try { catalog = JSON.parse(fs.readFileSync(CATALOG_FILE(), 'utf8')); } catch { catalog = {}; } }
   return catalog;
@@ -356,17 +368,17 @@ async function cacheIcons(urls) {
     await Promise.all(todo.slice(i, i + 6).map(u => download(u, path.join(ICONS(), iconName(u))).catch(() => {})));
   }
 }
-function remember(source, mcVersion, loader, hits) {
+function remember(source, mcVersion, loader, hits, type) {
   const c = loadCatalog();
-  const k = catKey(source, mcVersion, loader);
+  const k = catKey(source, mcVersion, loader, type);
   c[k] ||= { items: {} };
   for (const h of hits) c[k].items[h.id] = { ...h, iconLocal: undefined };
   saveCatalogSoon();
   cacheIcons(hits.map(h => h.icon)).catch(() => {});
 }
-function searchSaved({ source, query, mcVersion, loader, offset = 0, sort }) {
+function searchSaved({ source, query, mcVersion, loader, offset = 0, sort, type }) {
   const c = loadCatalog();
-  const all = Object.values(c[catKey(source, mcVersion, loader)]?.items || {});
+  const all = Object.values(c[catKey(source, mcVersion, loader, typeOf(type))]?.items || {});
   const words = cleanQuery(query).toLowerCase().split(/\s+/).filter(Boolean);
   let list = all.filter(h => {
     const text = `${h.title} ${h.slug} ${h.description} ${h.author} ${(h.categories || []).join(' ')}`.toLowerCase();
@@ -385,7 +397,7 @@ ipcMain.handle('mods:search', async (_e, q) => {
   if (!(net.isOnline())) return searchSaved(q);
   try {
     const r = await searchOnline(q);
-    if (!q.anyVersion) remember(q.source, q.mcVersion, q.loader, r.hits);
+    if (!q.anyVersion && q.type !== 'modpack') remember(q.source, q.mcVersion, q.loader, r.hits, typeOf(q.type));
     r.hits = r.hits.map(h => ({ ...h, icon: localIcon(h.icon) || h.icon }));
     return r;
   } catch (e) {
@@ -414,56 +426,61 @@ ipcMain.handle('mods:prefetch', async (_e, { mcVersion, loader }) => {
 });
 
 // Resolve the best file for this instance, download it, pull required dependencies (Modrinth + CurseForge).
-async function installModrinth(inst, projectId, seen = new Set()) {
+async function installModrinth(inst, projectId, seen = new Set(), type = 'mod') {
   if (!/^[A-Za-z0-9]{8}$/.test(projectId)) projectId = (await getJSON(`https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}`)).id; // slug -> id
   if (seen.has('mr:' + projectId)) return [];
   seen.add('mr:' + projectId);
   if (inst.mods.some(m => m.source === 'modrinth' && m.projectId === projectId)) return [];
   const p = new URLSearchParams({ game_versions: JSON.stringify([inst.mcVersion]) });
-  if (inst.loader !== 'vanilla') p.set('loaders', JSON.stringify(inst.loader === 'quilt' ? ['quilt', 'fabric'] : [inst.loader]));
-  const versions = await getJSON(`https://api.modrinth.com/v2/project/${projectId}/version?${p}`);
-  if (!versions.length) throw new Error(`No version for Minecraft ${inst.mcVersion} (${inst.loader}).`);
+  const LOADER_FILTER = { shader: ['iris', 'optifine'], resourcepack: ['minecraft'], datapack: ['datapack'] };
+  if (type === 'mod' && inst.loader !== 'vanilla') p.set('loaders', JSON.stringify(inst.loader === 'quilt' ? ['quilt', 'fabric'] : [inst.loader]));
+  else if (LOADER_FILTER[type]) p.set('loaders', JSON.stringify(LOADER_FILTER[type]));
+  let versions = await getJSON(`https://api.modrinth.com/v2/project/${projectId}/version?${p}`);
+  // Shaders and resource packs usually work across versions even if not tagged for yours
+  if (!versions.length && (type === 'shader' || type === 'resourcepack')) { p.delete('game_versions'); versions = await getJSON(`https://api.modrinth.com/v2/project/${projectId}/version?${p}`); }
+  if (!versions.length) throw new Error(`No version for Minecraft ${inst.mcVersion}${type === 'mod' ? ` (${inst.loader})` : ''}.`);
   const v = versions.find(x => x.version_type === 'release') || versions[0];
   const file = v.files.find(f => f.primary) || v.files[0];
   const project = await getJSON(`https://api.modrinth.com/v2/project/${projectId}`);
   send('mods:progress', { title: project.title, stage: 'downloading' });
-  await download(file.url, path.join(instDir(inst.id), 'mods', file.filename), f => send('mods:progress', { title: project.title, stage: 'downloading', pct: f }));
-  const entry = { source: 'modrinth', projectId, title: project.title, icon: project.icon_url || '', version: v.version_number, file: file.filename };
+  await download(file.url, path.join(instDir(inst.id), TYPES[type].dir, path.basename(file.filename)), f => send('mods:progress', { title: project.title, stage: 'downloading', pct: f }));
+  const entry = { source: 'modrinth', projectId, title: project.title, icon: project.icon_url || '', version: v.version_number, file: path.basename(file.filename), type };
   inst.mods.push(entry);
   const installed = [entry];
-  for (const dep of v.dependencies || []) {
+  for (const dep of type === 'mod' ? v.dependencies || [] : []) {
     if (dep.dependency_type === 'required' && dep.project_id) {
       try { installed.push(...await installModrinth(inst, dep.project_id, seen)); } catch (e) { console.warn('dep failed', e.message); }
     }
   }
   return installed;
 }
-async function installCurseforge(inst, modId, seen = new Set()) {
+async function installCurseforge(inst, modId, seen = new Set(), type = 'mod') {
   if (seen.has('cf:' + modId)) return [];
   seen.add('cf:' + modId);
   if (inst.mods.some(m => m.source === 'curseforge' && m.projectId === String(modId))) return [];
   const h = cfHeaders();
   const p = new URLSearchParams({ gameVersion: inst.mcVersion, pageSize: '20' });
-  if (CF_LOADER[inst.loader]) p.set('modLoaderType', String(CF_LOADER[inst.loader]));
-  const [{ data: mod }, { data: files }] = await Promise.all([
+  if (type === 'mod' && CF_LOADER[inst.loader]) p.set('modLoaderType', String(CF_LOADER[inst.loader]));
+  let [{ data: mod }, { data: files }] = await Promise.all([
     getJSON(`${CF_BASE}/mods/${modId}`, h),
     getJSON(`${CF_BASE}/mods/${modId}/files?${p}`, h),
   ]);
-  if (!files.length) throw new Error(`No file for Minecraft ${inst.mcVersion} (${inst.loader}).`);
+  if (!files.length && (type === 'shader' || type === 'resourcepack')) { p.delete('gameVersion'); files = (await getJSON(`${CF_BASE}/mods/${modId}/files?${p}`, h)).data; }
+  if (!files.length) throw new Error(`No file for Minecraft ${inst.mcVersion}${type === 'mod' ? ` (${inst.loader})` : ''}.`);
   const f = files.find(x => x.releaseType === 1) || files[0];
   let entry;
   if (f.downloadUrl) {
     send('mods:progress', { title: mod.name, stage: 'downloading' });
-    await download(f.downloadUrl, path.join(instDir(inst.id), 'mods', path.basename(f.fileName)), x => send('mods:progress', { title: mod.name, stage: 'downloading', pct: x }));
-    entry = { source: 'curseforge', projectId: String(modId), title: mod.name, icon: mod.logo?.thumbnailUrl || '', version: f.displayName, file: path.basename(f.fileName) };
+    await download(f.downloadUrl, path.join(instDir(inst.id), TYPES[type].dir, path.basename(f.fileName)), x => send('mods:progress', { title: mod.name, stage: 'downloading', pct: x }));
+    entry = { source: 'curseforge', projectId: String(modId), title: mod.name, icon: mod.logo?.thumbnailUrl || '', version: f.displayName, file: path.basename(f.fileName), type };
     inst.mods.push(entry);
   } else {
     // The author only allows downloads from CurseForge's website.
     // 1) Same mod on Modrinth? Install it from there, no website needed.
-    const viaModrinth = await curseforgeOnModrinth(inst, mod, f, seen);
+    const viaModrinth = await curseforgeOnModrinth(inst, mod, f, seen, type);
     if (viaModrinth) return viaModrinth;
     // 2) Otherwise download it from the CurseForge page inside the launcher and drop it in the mods folder for you.
-    entry = await downloadFromCurseforgePage(inst, mod, f);
+    entry = await downloadFromCurseforgePage(inst, mod, f, type);
     inst.mods.push(entry);
   }
   const installed = [entry];
@@ -475,27 +492,27 @@ async function installCurseforge(inst, modId, seen = new Set()) {
   return installed;
 }
 // Find the exact same file on Modrinth (by its SHA-1), or the same project by name.
-async function curseforgeOnModrinth(inst, mod, f, seen) {
+async function curseforgeOnModrinth(inst, mod, f, seen, type = 'mod') {
   try {
     const sha1 = (f.hashes || []).find(h => h.algo === 1)?.value;
     if (sha1) {
       const r = await fetch(`https://api.modrinth.com/v2/version_file/${sha1}?algorithm=sha1`, { headers: { 'User-Agent': UA } });
-      if (r.ok) { const v = await r.json(); return await installModrinth(inst, v.project_id, seen); }
+      if (r.ok) { const v = await r.json(); return await installModrinth(inst, v.project_id, seen, type); }
     }
     const r = await fetch(`https://api.modrinth.com/v2/project/${encodeURIComponent(mod.slug)}`, { headers: { 'User-Agent': UA } });
     if (r.ok) {
       const p = await r.json();
       const norm = t => String(t).toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (p.project_type === 'mod' && norm(p.title) === norm(mod.name)) return await installModrinth(inst, p.id, seen);
+      if (p.project_type === TYPES[type].mr && norm(p.title) === norm(mod.name)) return await installModrinth(inst, p.id, seen, type);
     }
   } catch (e) { console.warn('Modrinth fallback failed:', e.message); }
   return null;
 }
 // Open CurseForge's own download page in a small launcher window and catch the file it downloads.
 let cfQueue = Promise.resolve();
-function downloadFromCurseforgePage(inst, mod, f) {
+function downloadFromCurseforgePage(inst, mod, f, type = 'mod', toDir) {
   const job = cfQueue.then(() => new Promise((resolve, reject) => {
-    const modsDir = path.join(instDir(inst.id), 'mods');
+    const modsDir = toDir || path.join(instDir(inst.id), TYPES[type].dir);
     const page = `${mod.links?.websiteUrl || `https://www.curseforge.com/minecraft/mc-mods/${mod.slug}`}/download/${f.id}`;
     const dl = new BrowserWindow({
       parent: win, width: 980, height: 720, autoHideMenuBar: true, backgroundColor: '#0d0b14',
@@ -508,7 +525,7 @@ function downloadFromCurseforgePage(inst, mod, f) {
     const onDownload = (_e, item, wc) => {
       if (wc && wc !== dl.webContents && wc.hostWebContents !== dl.webContents) return;
       const name = path.basename(item.getFilename());
-      if (!/\.jar$/i.test(name)) return; // ignore anything that isn't a mod
+      if (!TYPES[type].ext.test(name)) return; // ignore anything that isn't the file we want
       item.setSavePath(path.join(modsDir, name));
       item.on('updated', () => { const t = item.getTotalBytes(); if (t) send('mods:progress', { title: mod.name, stage: 'downloading', pct: item.getReceivedBytes() / t }); });
       item.once('done', (_e2, st) => {
@@ -516,7 +533,7 @@ function downloadFromCurseforgePage(inst, mod, f) {
         finished = true;
         ses.removeListener('will-download', onDownload);
         if (!dl.isDestroyed()) dl.close();
-        resolve({ source: 'curseforge', projectId: String(mod.id), title: mod.name, icon: mod.logo?.thumbnailUrl || '', version: f.displayName, file: name });
+        resolve({ source: 'curseforge', projectId: String(mod.id), title: mod.name, icon: mod.logo?.thumbnailUrl || '', version: f.displayName, file: name, type });
       });
     };
     ses.on('will-download', onDownload);
@@ -530,10 +547,18 @@ function downloadFromCurseforgePage(inst, mod, f) {
   cfQueue = job.catch(() => {});
   return job;
 }
-ipcMain.handle('mods:install', async (_e, { instanceId, source, projectId }) => {
+ipcMain.handle('mods:install', async (_e, { instanceId, source, projectId, type }) => {
+  type = typeOf(type);
+  if (type === 'modpack') throw new Error('Modpacks install as a new instance.');
   const inst = await readInstance(instanceId);
   inst.mods ||= [];
-  const added = source === 'curseforge' ? await installCurseforge(inst, projectId) : await installModrinth(inst, projectId);
+  for (const t of Object.values(TYPES)) if (t.dir) await fsp.mkdir(path.join(instDir(inst.id), t.dir), { recursive: true });
+  const added = source === 'curseforge' ? await installCurseforge(inst, projectId, new Set(), type) : await installModrinth(inst, projectId, new Set(), type);
+  // Shaders need Iris (Fabric/Quilt/NeoForge) or Oculus (Forge) to work
+  if (type === 'shader') {
+    const need = inst.loader === 'forge' ? ['oculus', 'embeddium'] : ['iris', 'sodium'];
+    for (const slug of need) { try { added.push(...await installModrinth(inst, slug)); } catch (e) { console.warn('shader loader', slug, e.message); } }
+  }
   await writeInstance(inst);
   send('mods:progress', null);
   return { instance: inst, added };
@@ -564,7 +589,8 @@ ipcMain.handle('mods:addFiles', async (_e, { instanceId, files }) => {
 });
 ipcMain.handle('mods:remove', async (_e, { instanceId, file }) => {
   const inst = await readInstance(instanceId);
-  await fsp.rm(path.join(instDir(instanceId), 'mods', path.basename(file)), { force: true });
+  const entry = inst.mods.find(m => m.file === file);
+  await fsp.rm(path.join(instDir(instanceId), TYPES[typeOf(entry?.type)].dir, path.basename(file)), { force: true });
   inst.mods = inst.mods.filter(m => m.file !== file);
   return writeInstance(inst);
 });
@@ -619,8 +645,9 @@ async function ensureJava(major) {
 }
 
 // ---------- launch ----------
-async function ensureLoaderProfile(loader, mcVersion) {
-  try { return await fetchLoaderProfile(loader, mcVersion); }
+async function ensureLoaderProfile(loader, mcVersion, pinned) {
+  if (pinned) { const id = `${loader}-loader-${pinned}-${mcVersion}`; if (fs.existsSync(path.join(MC_ROOT(), 'versions', id, `${id}.json`))) return id; }
+  try { return await fetchLoaderProfile(loader, mcVersion, pinned); }
   catch (e) {
     // Offline: reuse a loader we've already set up for this version
     const dir = path.join(MC_ROOT(), 'versions');
@@ -629,11 +656,14 @@ async function ensureLoaderProfile(loader, mcVersion) {
     throw isNetErr(e) ? new Error(`Connect to the internet once to set up ${loader} for ${mcVersion}.`) : e;
   }
 }
-async function fetchLoaderProfile(loader, mcVersion) {
+async function fetchLoaderProfile(loader, mcVersion, pinned) {
   const base = LOADER_META[loader];
-  const loaders = await getJSON(`${base}/versions/loader/${mcVersion}`);
-  if (!loaders.length) throw new Error(`${loader} doesn't support ${mcVersion} yet.`);
-  const loaderVer = (loaders.find(l => l.loader.stable !== false) || loaders[0]).loader.version;
+  let loaderVer = pinned;
+  if (!loaderVer) {
+    const loaders = await getJSON(`${base}/versions/loader/${mcVersion}`);
+    if (!loaders.length) throw new Error(`${loader} doesn't support ${mcVersion} yet.`);
+    loaderVer = (loaders.find(l => l.loader.stable !== false) || loaders[0]).loader.version;
+  }
   const profile = await getJSON(`${base}/versions/loader/${mcVersion}/${loaderVer}/profile/json`);
   const id = profile.id;
   const dir = path.join(MC_ROOT(), 'versions', id);
@@ -645,16 +675,17 @@ ipcMain.handle('game:launch', async (_e, id) => {
   if (!currentUser) throw new Error('Sign in with Microsoft first.');
   if (running.has(id)) throw new Error('That instance is already running.');
   const inst = await readInstance(id);
+  await syncDatapacks(id);
   const store = readStore();
   send('launch:status', { id, stage: 'Checking Java…' });
   const javaPath = await ensureJava(await requiredJava(inst.mcVersion));
   let custom, forge;
   if (inst.loader === 'fabric' || inst.loader === 'quilt') {
     send('launch:status', { id, stage: `Setting up ${inst.loader}…` });
-    custom = await ensureLoaderProfile(inst.loader, inst.mcVersion);
+    custom = await ensureLoaderProfile(inst.loader, inst.mcVersion, inst.loaderVersion);
   } else if (inst.loader === 'forge' || inst.loader === 'neoforge') {
     send('launch:status', { id, stage: `Setting up ${inst.loader === 'forge' ? 'Forge' : 'NeoForge'} (first time takes a minute)…` });
-    forge = await ensureForgeInstaller(inst.loader, inst.mcVersion);
+    forge = await ensureForgeInstaller(inst.loader, inst.mcVersion, inst.loaderVersion);
   }
   // Join a server straight away (used by the Servers tab)
   const join = joinNext.get(id); joinNext.delete(id);
@@ -711,6 +742,17 @@ ipcMain.handle('speed:boost', async (_e, instanceId) => {
   await writeInstance(inst);
   return { instance: inst, added: added.map(a => a.title), skipped };
 });
+async function syncDatapacks(id) {
+  const src = path.join(instDir(id), 'datapacks'), saves = path.join(instDir(id), 'saves');
+  if (!fs.existsSync(src) || !fs.existsSync(saves)) return;
+  const packs = (await fsp.readdir(src)).filter(f => /\.zip$/i.test(f));
+  for (const w of await fsp.readdir(saves)) {
+    const dir = path.join(saves, w, 'datapacks');
+    if (!fs.existsSync(path.join(saves, w, 'level.dat'))) continue;
+    await fsp.mkdir(dir, { recursive: true });
+    for (const f of packs) if (!fs.existsSync(path.join(dir, f))) await fsp.copyFile(path.join(src, f), path.join(dir, f));
+  }
+}
 const joinNext = new Map();
 function newerOrSame(v, min) {
   const a = v.split('.').map(Number), b = min.split('.').map(Number);
@@ -1018,4 +1060,285 @@ ipcMain.handle('maker:export', async (_e, { mod, mcVersion }) => {
   await fsp.writeFile(r.filePath, buf);
   shell.showItemInFolder(r.filePath);
   return r.filePath;
+});
+
+// ---------- modpacks: install from Modrinth/CurseForge or a file ----------
+const MR = 'https://api.modrinth.com/v2';
+const sha = (algo, buf) => crypto.createHash(algo).update(buf).digest('hex');
+const packProgress = (stage, done, total) => send('modpack:progress', { stage, done, total });
+async function pool(items, n, fn) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) { const k = i++; await fn(items[k], k); } }));
+}
+// Keeps paths inside the instance folder (a modpack can't write anywhere else)
+function safeJoin(base, rel) {
+  const out = path.resolve(base, rel);
+  if (!out.startsWith(path.resolve(base) + path.sep)) throw new Error(`Unsafe path in modpack: ${rel}`);
+  return out;
+}
+function extractOverrides(zip, prefix, dest) {
+  for (const e of zip.getEntries()) {
+    if (e.isDirectory || !e.entryName.startsWith(prefix + '/')) continue;
+    const out = safeJoin(dest, e.entryName.slice(prefix.length + 1));
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, e.getData());
+  }
+}
+async function newInstanceFolder(name, mcVersion, loader, loaderVersion, icon, extra = {}) {
+  const slug = (name || 'modpack').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'modpack';
+  let id = slug, n = 2;
+  while (fs.existsSync(instDir(id))) id = `${slug}-${n++}`;
+  const inst = { id, name, mcVersion, loader, loaderVersion: loaderVersion || null, icon: icon || 'amethyst', created: Date.now(), mods: [], ...extra };
+  await writeInstance(inst);
+  for (const t of Object.values(TYPES)) if (t.dir) await fsp.mkdir(path.join(instDir(id), t.dir), { recursive: true });
+  return inst;
+}
+// List files that came in a modpack's extra folders so they show in the Installed tab
+async function trackLooseFiles(inst, label) {
+  for (const [type, t] of Object.entries(TYPES)) {
+    if (!t.dir) continue;
+    const d = path.join(instDir(inst.id), t.dir);
+    if (!fs.existsSync(d)) continue;
+    for (const f of await fsp.readdir(d)) {
+      if (!t.ext.test(f) || inst.mods.some(m => m.file === f && (m.type || 'mod') === type)) continue;
+      inst.mods.push({ source: 'modpack', projectId: f, title: f.replace(/\.(jar|zip)$/i, ''), icon: '', version: label, file: f, type });
+    }
+  }
+}
+const typeForPath = rel => (Object.entries(TYPES).find(([, t]) => t.dir && rel.startsWith(t.dir + '/')) || ['mod'])[0];
+async function importMrpack(file, meta = {}) {
+  const zip = new AdmZip(file);
+  const index = JSON.parse(zip.readAsText('modrinth.index.json'));
+  const d = index.dependencies || {};
+  const loader = d['fabric-loader'] ? 'fabric' : d['quilt-loader'] ? 'quilt' : d.neoforge ? 'neoforge' : d.forge ? 'forge' : 'vanilla';
+  const loaderVersion = d['fabric-loader'] || d['quilt-loader'] || d.neoforge || d.forge || null;
+  const inst = await newInstanceFolder(meta.name || index.name, d.minecraft, loader, loaderVersion, 'amethyst', { modpack: { name: index.name, version: index.versionId, source: meta.source || 'file', projectId: meta.projectId || null, icon: meta.icon || '' }, boosted: true });
+  const files = (index.files || []).filter(f => f.env?.client !== 'unsupported');
+  let done = 0;
+  await pool(files, 6, async f => {
+    const dest = safeJoin(instDir(inst.id), f.path);
+    await download(f.downloads[0], dest);
+    if (f.hashes?.sha1 && sha('sha1', await fsp.readFile(dest)) !== f.hashes.sha1) throw new Error(`${path.basename(f.path)} didn't download correctly. Try again.`);
+    const type = typeForPath(f.path.replace(/\\/g, '/'));
+    if (type !== 'modpack') inst.mods.push({ source: 'modpack', projectId: f.hashes?.sha1 || f.path, title: path.basename(f.path).replace(/\.(jar|zip)$/i, ''), icon: '', version: index.name, file: path.basename(f.path), type });
+    packProgress('Downloading files', ++done, files.length);
+  });
+  extractOverrides(zip, 'overrides', instDir(inst.id));
+  extractOverrides(zip, 'client-overrides', instDir(inst.id));
+  await trackLooseFiles(inst, index.name);
+  await writeInstance(inst);
+  return inst;
+}
+async function importCurseforgePack(file, meta = {}) {
+  const zip = new AdmZip(file);
+  const man = JSON.parse(zip.readAsText('manifest.json'));
+  const primary = (man.minecraft.modLoaders || []).find(l => l.primary) || man.minecraft.modLoaders?.[0];
+  const [lname, ...rest] = (primary?.id || 'vanilla').split('-');
+  const loader = { forge: 'forge', neoforge: 'neoforge', fabric: 'fabric', quilt: 'quilt' }[lname] || 'vanilla';
+  let loaderVersion = rest.join('-') || null;
+  if (loader === 'neoforge' && loaderVersion?.startsWith('1.20.1-')) loaderVersion = null; // old NeoForge naming: use newest
+  const inst = await newInstanceFolder(meta.name || man.name, man.minecraft.version, loader, loaderVersion, 'netherrack', { modpack: { name: man.name, version: man.version, source: meta.source || 'file', projectId: meta.projectId || null, icon: meta.icon || '' }, boosted: true });
+  const wanted = (man.files || []).filter(f => f.required !== false);
+  const manual = [];
+  if (wanted.length) {
+    const h = cfHeaders();
+    const post = async (url, body) => { const r = await fetch(url, { method: 'POST', headers: { ...h, 'User-Agent': UA, 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) }); if (!r.ok) throw new Error(`CurseForge said ${r.status}`); return (await r.json()).data; };
+    const filesInfo = await post(`${CF_BASE}/mods/files`, { fileIds: wanted.map(f => f.fileID) });
+    const modsInfo = await post(`${CF_BASE}/mods`, { modIds: [...new Set(wanted.map(f => f.projectID))] });
+    const classOf = Object.fromEntries(modsInfo.map(m => [m.id, m.classId]));
+    const modOf = Object.fromEntries(modsInfo.map(m => [m.id, m]));
+    let done = 0;
+    await pool(filesInfo, 6, async f => {
+      const type = (Object.entries(TYPES).find(([, t]) => t.cf === classOf[f.modId]) || ['mod'])[0];
+      const dir = path.join(instDir(inst.id), TYPES[type].dir || 'mods');
+      const name = path.basename(f.fileName);
+      let ok = false;
+      if (f.downloadUrl) { await download(f.downloadUrl, path.join(dir, name)); ok = true; }
+      else {
+        // Restricted file: try the identical file on Modrinth
+        const sha1 = (f.hashes || []).find(x => x.algo === 1)?.value;
+        if (sha1) {
+          const r = await fetch(`${MR}/version_file/${sha1}?algorithm=sha1`, { headers: { 'User-Agent': UA } });
+          if (r.ok) { const v = await r.json(); const vf = v.files.find(x => x.hashes.sha1 === sha1) || v.files[0]; await download(vf.url, path.join(dir, name)); ok = true; }
+        }
+      }
+      if (ok) inst.mods.push({ source: 'curseforge', projectId: String(f.modId), title: modOf[f.modId]?.name || name, icon: modOf[f.modId]?.logo?.thumbnailUrl || '', version: f.displayName, file: name, type });
+      else manual.push({ mod: modOf[f.modId], file: f, type });
+      packProgress('Downloading files', ++done, filesInfo.length);
+    });
+  }
+  extractOverrides(zip, man.overrides || 'overrides', instDir(inst.id));
+  await trackLooseFiles(inst, man.name);
+  await writeInstance(inst);
+  // Files whose authors only allow website downloads: open each page in the launcher, one at a time
+  for (const m of manual) {
+    try { inst.mods.push(await downloadFromCurseforgePage(inst, m.mod, m.file, m.type)); await writeInstance(inst); }
+    catch (e) { console.warn('skipped', m.mod?.name); }
+  }
+  return { inst, skipped: manual.length };
+}
+async function importPackFile(file, meta) {
+  const zip = new AdmZip(file);
+  if (zip.getEntry('modrinth.index.json')) return { inst: await importMrpack(file, meta), skipped: 0 };
+  if (zip.getEntry('manifest.json')) return importCurseforgePack(file, meta);
+  throw new Error("That file isn't a modpack P1xel Lab understands (.mrpack or CurseForge .zip).");
+}
+ipcMain.handle('modpack:install', async (_e, { source, projectId, title, icon }) => {
+  const tmp = path.join(app.getPath('temp'), `p1xel-pack-${Date.now()}`);
+  let file;
+  packProgress('Finding the newest version', 0, 1);
+  if (source === 'curseforge') {
+    const h = cfHeaders();
+    const { data: files } = await getJSON(`${CF_BASE}/mods/${projectId}/files?pageSize=20`, h);
+    const f = files.find(x => x.releaseType === 1) || files[0];
+    if (!f) throw new Error('No downloadable version found.');
+    file = tmp + '.zip';
+    if (f.downloadUrl) await download(f.downloadUrl, file, x => packProgress('Downloading modpack', x, 1));
+    else {
+      const { data: mod } = await getJSON(`${CF_BASE}/mods/${projectId}`, h);
+      const got = await downloadFromCurseforgePage({ id: 'tmp' }, mod, f, 'modpack', app.getPath('temp'));
+      file = path.join(app.getPath('temp'), got.file);
+    }
+  } else {
+    const versions = await getJSON(`${MR}/project/${projectId}/version`);
+    const v = versions.find(x => x.version_type === 'release') || versions[0];
+    if (!v) throw new Error('No downloadable version found.');
+    const f = v.files.find(x => x.primary) || v.files[0];
+    file = tmp + '.mrpack';
+    await download(f.url, file, x => packProgress('Downloading modpack', x, 1));
+  }
+  try { const r = await importPackFile(file, { name: title, source, projectId, icon }); return { instance: r.inst, skipped: r.skipped }; }
+  finally { fsp.rm(file, { force: true }).catch(() => {}); packProgress(null); }
+});
+ipcMain.handle('modpack:importFile', async () => {
+  const r = await dialog.showOpenDialog(win, { title: 'Import a modpack', properties: ['openFile'], filters: [{ name: 'Modpacks', extensions: ['mrpack', 'zip'] }] });
+  if (r.canceled) return null;
+  try { const out = await importPackFile(r.filePaths[0], {}); return { instance: out.inst, skipped: out.skipped }; }
+  finally { packProgress(null); }
+});
+
+// ---------- make & publish your own stuff ----------
+const LOADER_NAME_MAIN = { fabric: 'Fabric', quilt: 'Quilt', forge: 'Forge', neoforge: 'NeoForge' };
+const PUB_TMP = () => path.join(app.getPath('temp'), 'p1xel-publish');
+// Turn an instance into a .mrpack modpack (Modrinth's modpack format)
+async function exportMrpack(instanceId, { name, version, summary }) {
+  const inst = await readInstance(instanceId);
+  const dir = instDir(inst.id);
+  const zip = new AdmZip();
+  const files = [];
+  const contentFiles = [];
+  for (const t of ['mod', 'resourcepack', 'shader', 'datapack']) {
+    const d = path.join(dir, TYPES[t].dir);
+    if (fs.existsSync(d)) for (const f of await fsp.readdir(d)) if (TYPES[t].ext.test(f)) contentFiles.push(`${TYPES[t].dir}/${f}`);
+  }
+  // Files that are on Modrinth get linked (so the pack stays small); anything else is included in the pack
+  const hashes = {};
+  for (const rel of contentFiles) { const buf = await fsp.readFile(path.join(dir, rel)); hashes[rel] = { buf, sha1: sha('sha1', buf), sha512: sha('sha512', buf) }; }
+  let known = {};
+  try {
+    const r = await fetch(`${MR}/version_files`, { method: 'POST', headers: { 'User-Agent': UA, 'Content-Type': 'application/json' }, body: JSON.stringify({ hashes: Object.values(hashes).map(h => h.sha1), algorithm: 'sha1' }) });
+    if (r.ok) known = await r.json();
+  } catch {}
+  for (const rel of contentFiles) {
+    const h = hashes[rel], v = known[h.sha1];
+    const vf = v?.files.find(f => f.hashes.sha1 === h.sha1);
+    if (vf) files.push({ path: rel, hashes: { sha1: h.sha1, sha512: h.sha512 }, env: { client: 'required', server: rel.startsWith('mods/') ? 'optional' : 'unsupported' }, downloads: [vf.url], fileSize: h.buf.length });
+    else zip.addFile(`overrides/${rel}`, h.buf);
+  }
+  for (const extra of ['config', 'options.txt', 'defaultconfigs', 'kubejs']) {
+    const p = path.join(dir, extra);
+    if (!fs.existsSync(p)) continue;
+    if (fs.statSync(p).isDirectory()) zip.addLocalFolder(p, `overrides/${extra}`); else zip.addLocalFile(p, 'overrides');
+  }
+  const deps = { minecraft: inst.mcVersion };
+  let lv = inst.loaderVersion;
+  try {
+    if (!lv && (inst.loader === 'fabric' || inst.loader === 'quilt')) { const l = await getJSON(`${LOADER_META[inst.loader]}/versions/loader/${inst.mcVersion}`); lv = (l.find(x => x.loader.stable !== false) || l[0]).loader.version; }
+    if (!lv && inst.loader === 'forge') lv = await forgeVersion(inst.mcVersion);
+    if (!lv && inst.loader === 'neoforge') lv = await neoforgeVersion(inst.mcVersion);
+  } catch {}
+  const depKey = { fabric: 'fabric-loader', quilt: 'quilt-loader', forge: 'forge', neoforge: 'neoforge' }[inst.loader];
+  if (depKey && !lv) throw new Error(`Connect to the internet so P1xel Lab can look up the ${LOADER_NAME_MAIN[inst.loader]} version for your modpack.`);
+  if (depKey) deps[depKey] = lv;
+  zip.addFile('modrinth.index.json', Buffer.from(JSON.stringify({ formatVersion: 1, game: 'minecraft', versionId: version || '1.0.0', name: name || inst.name, summary: summary || '', files, dependencies: deps }, null, 2)));
+  await fsp.mkdir(PUB_TMP(), { recursive: true });
+  const out = path.join(PUB_TMP(), `${ID(name || inst.name)}-${version || '1.0.0'}.mrpack`);
+  await fsp.writeFile(out, zip.toBuffer());
+  return { file: out, mcVersions: [inst.mcVersion], loaders: inst.loader === 'vanilla' ? ['minecraft'] : [inst.loader], linked: files.length, included: contentFiles.length - files.length };
+}
+// Mod Maker project as a data pack .zip (works without any mod loader)
+function makerDatapack(mod, mc) {
+  if (!makerSupports(mc)) throw new Error('Mod Maker data packs work on Minecraft 1.21 to 1.21.4.');
+  const { modid, files } = buildModFiles(mod, mc);
+  const zip = new AdmZip();
+  for (const [p, c] of Object.entries(files)) if (p !== 'fabric.mod.json') zip.addFile(p, Buffer.from(c, 'utf8'));
+  if (mod.icon?.startsWith('data:image/png;base64,')) zip.addFile('pack.png', Buffer.from(mod.icon.split(',')[1], 'base64'));
+  return { modid, buf: zip.toBuffer() };
+}
+// Get the file ready to save or publish. kind: mod | modpack | resourcepack | datapack | shader
+ipcMain.handle('publish:prepare', async (_e, { kind, from, makerMod, instanceId, mcVersion, name, version, summary }) => {
+  await fsp.mkdir(PUB_TMP(), { recursive: true });
+  if (kind === 'modpack') return exportMrpack(instanceId, { name, version, summary });
+  if (from === 'maker') {
+    if (kind === 'mod') { const r = modJarBuffer(makerMod, mcVersion); const out = path.join(PUB_TMP(), `${r.modid}-${makerMod.version || '1.0.0'}.jar`); await fsp.writeFile(out, r.buf); return { file: out, mcVersions: [mcVersion], loaders: ['fabric', 'quilt'] }; }
+    if (kind === 'datapack') { const r = makerDatapack(makerMod, mcVersion); const out = path.join(PUB_TMP(), `${r.modid}-${makerMod.version || '1.0.0'}.zip`); await fsp.writeFile(out, r.buf); return { file: out, mcVersions: [mcVersion], loaders: ['datapack'] }; }
+  }
+  const ext = { mod: ['jar'], resourcepack: ['zip'], datapack: ['zip'], shader: ['zip'] }[kind];
+  const r = await dialog.showOpenDialog(win, { title: 'Pick your file', properties: ['openFile'], filters: [{ name: 'Your file', extensions: ext }] });
+  if (r.canceled) return null;
+  const f = r.filePaths[0];
+  const guess = { mod: [], resourcepack: ['minecraft'], datapack: ['datapack'], shader: ['iris'] }[kind];
+  // Read the version/loader from a mod's own info file when we can
+  let mcVersions = [], loaders = guess;
+  try {
+    const z = new AdmZip(f);
+    if (z.getEntry('fabric.mod.json')) { loaders = ['fabric', 'quilt']; const mcDep = JSON.parse(z.readAsText('fabric.mod.json')).depends?.minecraft; if (typeof mcDep === 'string') mcVersions = [mcDep.replace(/[^0-9.]/g, '')].filter(Boolean); }
+    else if (z.getEntry('META-INF/neoforge.mods.toml')) loaders = ['neoforge'];
+    else if (z.getEntry('META-INF/mods.toml')) loaders = ['forge'];
+  } catch {}
+  return { file: f, mcVersions, loaders };
+});
+ipcMain.handle('publish:save', async (_e, file) => {
+  const r = await dialog.showSaveDialog(win, { title: 'Save file', defaultPath: path.basename(file) });
+  if (r.canceled) return null;
+  await fsp.copyFile(file, r.filePath);
+  shell.showItemInFolder(r.filePath);
+  return r.filePath;
+});
+ipcMain.handle('publish:token', (_e, token) => {
+  if (token !== undefined) saveSecret('mrToken', String(token).trim());
+  return !!loadSecret('mrToken');
+});
+// Publish to Modrinth with the creator's own Modrinth token: creates a draft project + uploads the file
+ipcMain.handle('publish:modrinth', async (_e, { kind, file, title, slug, summary, body, categories, mcVersions, loaders, version, iconDataUrl }) => {
+  const token = loadSecret('mrToken');
+  if (!token) throw new Error('Add your Modrinth token first.');
+  const auth = { Authorization: token, 'User-Agent': UA };
+  const post = async (url, form) => {
+    const r = await fetch(url, { method: 'POST', headers: auth, body: form });
+    const text = await r.text();
+    if (!r.ok) {
+      let msg = text; try { const j = JSON.parse(text); msg = j.description || j.error || text; } catch {}
+      throw new Error(r.status === 401 ? 'Modrinth didn\'t accept your token. Make a new one with the scopes listed.' : `Modrinth: ${String(msg).slice(0, 300)}`);
+    }
+    return JSON.parse(text);
+  };
+  const projectType = TYPES[kind].mr;
+  const form = new FormData();
+  form.append('data', JSON.stringify({
+    slug, title, description: summary, body: body || summary, categories: categories || [], additional_categories: [],
+    client_side: kind === 'datapack' ? 'optional' : 'required', server_side: kind === 'mod' || kind === 'datapack' ? 'optional' : kind === 'modpack' ? 'optional' : 'unsupported',
+    license_id: 'LicenseRef-All-Rights-Reserved', project_type: projectType, initial_versions: [], is_draft: true,
+  }));
+  if (iconDataUrl?.startsWith('data:image/png;base64,')) form.append('icon', new Blob([Buffer.from(iconDataUrl.split(',')[1], 'base64')], { type: 'image/png' }), 'icon.png');
+  const project = await post(`${MR}/project`, form);
+  const vform = new FormData();
+  const fname = path.basename(file);
+  vform.append('data', JSON.stringify({
+    project_id: project.id, name: `${title} ${version}`, version_number: version, changelog: 'First release, made with P1xel Lab.',
+    dependencies: [], game_versions: mcVersions, version_type: 'release', loaders, featured: true, file_parts: ['file'], primary_file: 'file',
+  }));
+  vform.append('file', new Blob([await fsp.readFile(file)]), fname);
+  await post(`${MR}/version`, vform);
+  return { url: `https://modrinth.com/${projectType}/${project.slug || slug}`, slug: project.slug || slug };
 });
