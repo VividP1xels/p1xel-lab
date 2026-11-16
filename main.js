@@ -172,11 +172,13 @@ ipcMain.handle('store:get', () => {
     breakMinutes: s.breakMinutes ?? 0,
     notifyOnline: s.notifyOnline !== false,
     lastSeenVersion: s.lastSeenVersion || '',
+    collections: Array.isArray(s.collections) ? s.collections : [],
   };
 });
 ipcMain.handle('store:set', (_e, patch) => {
   const allowed = {};
-  for (const k of ['tutorialDone', 'ramMB', 'javaPath', 'accent', 'themePreset', 'hideOnPlay', 'breakMinutes', 'notifyOnline', 'lastSeenVersion']) if (k in patch) allowed[k] = patch[k];
+  for (const k of ['tutorialDone', 'ramMB', 'javaPath', 'accent', 'themePreset', 'hideOnPlay', 'breakMinutes', 'notifyOnline', 'lastSeenVersion', 'collections']) if (k in patch) allowed[k] = patch[k];
+  if ('collections' in allowed) allowed.collections = (Array.isArray(allowed.collections) ? allowed.collections : []).slice(0, 50).map(c => ({ id: String(c.id || '').slice(0, 40), name: String(c.name || 'Collection').slice(0, 40), items: (Array.isArray(c.items) ? c.items : []).slice(0, 200).map(i => ({ source: i.source === 'curseforge' ? 'curseforge' : 'modrinth', id: String(i.id).slice(0, 40), title: String(i.title || '').slice(0, 80), icon: String(i.icon || '').slice(0, 400), type: String(i.type || 'mod').slice(0, 20) })) }));
   if ('curseforgeKey' in patch) saveSecret('cfKey', patch.curseforgeKey || '');
   writeStore(allowed);
   return true;
@@ -285,6 +287,8 @@ ipcMain.handle('instances:update', async (_e, { id, patch }) => {
   if ('ramMB' in patch) inst.ramMB = patch.ramMB ? Math.max(1024, Math.min(65536, Math.round(Number(patch.ramMB)))) : null;
   if ('window' in patch) inst.window = patch.window ? { width: Math.max(320, Math.min(7680, Math.round(Number(patch.window.width) || 854))), height: Math.max(240, Math.min(4320, Math.round(Number(patch.window.height) || 480))), fullscreen: !!patch.window.fullscreen } : null;
   if ('notes' in patch) inst.notes = String(patch.notes || '').slice(0, 5000);
+  if ('iconImage' in patch) { const u = String(patch.iconImage || ''); if (u && !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(u)) throw new Error('That picture can\'t be used.'); if (u.length > 600000) throw new Error('That picture is too big.'); inst.iconImage = u || undefined; }
+  if ('group' in patch) inst.group = String(patch.group || '').replace(/[\r\n]/g, ' ').trim().slice(0, 30) || undefined;
   return writeInstance(inst);
 });
 ipcMain.handle('instances:duplicate', async (_e, id) => {
@@ -327,6 +331,7 @@ const TYPES = {
   datapack: { dir: 'datapacks', mr: 'datapack', cf: 6945, ext: /\.zip$/i },
   modpack: { dir: null, mr: 'modpack', cf: 4471, ext: /\.(mrpack|zip)$/i },
   plugin: { dir: 'plugins', mr: 'plugin', cf: 5, ext: /\.jar$/i },
+  world: { dir: null, mr: null, cf: 17, ext: /\.zip$/i },
 };
 // Where a type goes: instances use TYPES, servers can override (data packs in the world, shaders in the Player Pack…)
 const rootOf = t => t.__root || instDir(t.id);
@@ -350,19 +355,22 @@ const byVersionDesc = (a, b) => (newerOrSame(a, b) ? (a === b ? 0 : -1) : 1);
 let cfCategories = null;
 async function cfCategoryId(classId, want) {
   cfCategories ||= (await getJSON(`${CF_BASE}/categories?gameId=432`, cfHeaders())).data;
-  const w = want.replace(/-/g, '');
+  const w = want.replace(/[-+]/g, '');
   const c = cfCategories.find(x => x.classId === classId && (x.slug.replace(/-/g, '').includes(w) || x.name.toLowerCase().replace(/[^a-z]/g, '').includes(w)));
   return c?.id || null;
 }
 async function searchOnline({ source, query, mcVersion, loader, offset = 0, sort, limit = 20, anyVersion, type, server, category }) {
-  category = /^[a-z0-9-]{2,30}$/.test(category || '') ? category : null;
+  category = /^[a-z0-9+-]{2,30}$/.test(category || '') ? category : null;
+  const texture = type === 'texturepack';
+  if (texture) type = 'resourcepack';
   type = typeOf(type);
+  if (type === 'world' && source !== 'curseforge') throw new Error('Worlds and maps come from CurseForge. Switch to CurseForge to see them.');
   const pluginLoaders = ['paper', 'spigot', 'bukkit', 'purpur'];
   query = cleanQuery(query);
   if (anyVersion || type === 'modpack') { mcVersion = null; loader = null; }
   if (!usesLoader(type)) loader = null;
   if (source === 'curseforge') {
-    const p = new URLSearchParams({ gameId: '432', classId: String(TYPES[type].cf), searchFilter: query || '', index: String(offset), pageSize: String(Math.min(limit, 50)), sortField: sort === 'downloads' ? '6' : '2', sortOrder: 'desc' });
+    const p = new URLSearchParams({ gameId: '432', classId: String(TYPES[type].cf), searchFilter: query || '', index: String(offset), pageSize: String(Math.min(limit, 50)), sortField: ({ downloads: '6', newest: '11', updated: '3' })[sort] || '2', sortOrder: 'desc' });
     if (mcVersion) p.set('gameVersion', mcVersion);
     if (CF_LOADER[loader]) p.set('modLoaderType', String(CF_LOADER[loader]));
     if (category) { const cid = await cfCategoryId(TYPES[type].cf, category).catch(() => null); if (cid) p.set('categoryId', String(cid)); }
@@ -383,10 +391,11 @@ async function searchOnline({ source, query, mcVersion, loader, offset = 0, sort
   const facets = [[`project_type:${TYPES[type].mr}`]];
   if (mcVersion) facets.push([`versions:${mcVersion}`]);
   if (category) facets.push([`categories:${category}`]);
+  else if (texture) facets.push(['8x-', '16x', '32x', '48x', '64x', '128x', '256x', '512x+'].map(r => `categories:${r}`));
   if (type === 'plugin') facets.push(pluginLoaders.map(l => `categories:${l}`));
   else if (loader && loader !== 'vanilla') facets.push([`categories:${loader}`]);
   if (server && type === 'mod') facets.push(['server_side:required', 'server_side:optional']);
-  const p = new URLSearchParams({ query: query || '', limit: String(limit), offset: String(offset), index: sort === 'downloads' ? 'downloads' : 'relevance', facets: JSON.stringify(facets) });
+  const p = new URLSearchParams({ query: query || '', limit: String(limit), offset: String(offset), index: ['downloads', 'newest', 'updated'].includes(sort) ? sort : 'relevance', facets: JSON.stringify(facets) });
   const r = await getJSON(`https://api.modrinth.com/v2/search?${p}`);
   return {
     total: r.total_hits,
@@ -436,7 +445,7 @@ function remember(source, mcVersion, loader, hits, type) {
 }
 function searchSaved({ source, query, mcVersion, loader, offset = 0, sort, type }) {
   const c = loadCatalog();
-  const all = Object.values(c[catKey(source, mcVersion, loader, typeOf(type))]?.items || {});
+  const all = Object.values(c[catKey(source, mcVersion, loader, typeOf(type === 'texturepack' ? 'resourcepack' : type))]?.items || {});
   const words = cleanQuery(query).toLowerCase().split(/\s+/).filter(Boolean);
   let list = all.filter(h => {
     const text = `${h.title} ${h.slug} ${h.description} ${h.author} ${(h.categories || []).join(' ')}`.toLowerCase();
@@ -455,7 +464,7 @@ ipcMain.handle('mods:search', async (_e, q) => {
   if (!(net.isOnline())) return searchSaved(q);
   try {
     const r = await searchOnline(q);
-    if (!q.anyVersion && q.type !== 'modpack') remember(q.source, q.mcVersion, q.loader, r.hits, typeOf(q.type));
+    if (!q.anyVersion && q.type !== 'modpack' && q.type !== 'world' && !['newest', 'updated'].includes(q.sort)) remember(q.source, q.mcVersion, q.loader, r.hits, q.type === 'texturepack' ? 'resourcepack' : typeOf(q.type));
     r.hits = r.hits.map(h => ({ ...h, icon: localIcon(h.icon) || h.icon }));
     return r;
   } catch (e) {
@@ -484,7 +493,7 @@ ipcMain.handle('mods:prefetch', async (_e, { mcVersion, loader }) => {
 });
 
 // Resolve the best file for this instance, download it, pull required dependencies (Modrinth + CurseForge).
-async function installModrinth(inst, projectId, seen = new Set(), type = 'mod') {
+async function installModrinth(inst, projectId, seen = new Set(), type = 'mod', pin = null) {
   if (!/^[A-Za-z0-9]{8}$/.test(projectId)) projectId = (await getJSON(`https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}`)).id; // slug -> id
   if (seen.has('mr:' + projectId)) return [];
   seen.add('mr:' + projectId);
@@ -494,7 +503,7 @@ async function installModrinth(inst, projectId, seen = new Set(), type = 'mod') 
   if (type === 'clientmod') type = 'mod';
   if (type === 'mod' && inst.loader !== 'vanilla') p.set('loaders', JSON.stringify(inst.loader === 'quilt' ? ['quilt', 'fabric'] : [inst.loader]));
   else if (LOADER_FILTER[type]) p.set('loaders', JSON.stringify(LOADER_FILTER[type]));
-  let versions = await getJSON(`https://api.modrinth.com/v2/project/${projectId}/version?${p}`);
+  let versions = pin ? [await getJSON(`https://api.modrinth.com/v2/version/${encodeURIComponent(pin)}`)] : await getJSON(`https://api.modrinth.com/v2/project/${projectId}/version?${p}`);
   // Shaders and resource packs usually work across versions even if not tagged for yours
   if (!versions.length && (type === 'shader' || type === 'resourcepack')) { p.delete('game_versions'); versions = await getJSON(`https://api.modrinth.com/v2/project/${projectId}/version?${p}`); }
   if (!versions.length) throw new Error(`No version for Minecraft ${inst.mcVersion}${type === 'mod' ? ` (${inst.loader})` : ''}.`);
@@ -517,7 +526,7 @@ async function installModrinth(inst, projectId, seen = new Set(), type = 'mod') 
   }
   return installed;
 }
-async function installCurseforge(inst, modId, seen = new Set(), type = 'mod') {
+async function installCurseforge(inst, modId, seen = new Set(), type = 'mod', pin = null) {
   if (seen.has('cf:' + modId)) return [];
   seen.add('cf:' + modId);
   if (inst.mods.some(m => m.source === 'curseforge' && m.projectId === String(modId))) return [];
@@ -529,6 +538,7 @@ async function installCurseforge(inst, modId, seen = new Set(), type = 'mod') {
     getJSON(`${CF_BASE}/mods/${modId}`, h),
     getJSON(`${CF_BASE}/mods/${modId}/files?${p}`, h),
   ]);
+  if (pin) files = [(await getJSON(`${CF_BASE}/mods/${modId}/files/${encodeURIComponent(pin)}`, h)).data];
   if (!files.length && (type === 'shader' || type === 'resourcepack')) { p.delete('gameVersion'); files = (await getJSON(`${CF_BASE}/mods/${modId}/files?${p}`, h)).data; }
   if (!files.length) throw new Error(`No file for Minecraft ${inst.mcVersion}${type === 'mod' ? ` (${inst.loader})` : ''}.`);
   const f = files.find(x => x.releaseType === 1) || files[0];
@@ -612,13 +622,23 @@ function downloadFromCurseforgePage(inst, mod, f, type = 'mod', toDir) {
   cfQueue = job.catch(() => {});
   return job;
 }
-ipcMain.handle('mods:install', async (_e, { instanceId, source, projectId, type }) => {
+ipcMain.handle('mods:install', async (_e, { instanceId, source, projectId, type, versionId }) => {
+  if (type === 'texturepack') type = 'resourcepack';
   type = typeOf(type);
   if (type === 'modpack') throw new Error('Modpacks install as a new instance.');
+  if (type === 'world') return installWorldCF(instanceId, projectId, versionId);
   const inst = await readInstance(instanceId);
   inst.mods ||= [];
   for (const t of Object.values(TYPES)) if (t.dir) await fsp.mkdir(path.join(instDir(inst.id), t.dir), { recursive: true });
-  const added = source === 'curseforge' ? await installCurseforge(inst, projectId, new Set(), type) : await installModrinth(inst, projectId, new Set(), type);
+  // Picking a different version: take the old one out first
+  if (versionId) {
+    const pid = String(projectId);
+    for (const m of inst.mods.filter(x => x.source === source && x.projectId === pid)) {
+      for (const f of [m.file, m.file + '.disabled']) await fsp.rm(path.join(instDir(inst.id), TYPES[m.type || 'mod']?.dir || 'mods', path.basename(f)), { force: true });
+    }
+    inst.mods = inst.mods.filter(x => !(x.source === source && x.projectId === pid));
+  }
+  const added = source === 'curseforge' ? await installCurseforge(inst, projectId, new Set(), type, versionId || null) : await installModrinth(inst, projectId, new Set(), type, versionId || null);
   // Shaders need Iris (Fabric/Quilt/NeoForge) or Oculus (Forge) to work
   if (type === 'shader') {
     const need = inst.loader === 'forge' ? ['oculus', 'embeddium'] : ['iris', 'sodium'];
@@ -1012,7 +1032,7 @@ ipcMain.handle('servers:create', async (_e, { name, mcVersion, loader, ramMB, fr
 });
 ipcMain.handle('servers:update', async (_e, { id, ...patch }) => {
   const s = await readServer(id);
-  for (const k of ['name', 'eula', 'autoRestart', 'backupOnStop', 'icon', 'port']) if (k in patch) s[k] = patch[k];
+  for (const k of ['name', 'eula', 'autoRestart', 'backupOnStop', 'icon', 'port', 'dailyBackup']) if (k in patch) s[k] = patch[k];
   if ('ramMB' in patch) s.ramMB = patch.ramMB === 'unlimited' ? 'unlimited' : Math.max(0, Math.min(10000 * 1024, Number(patch.ramMB) || 0));
   if ('port' in patch) { const p = Math.round(Number(patch.port)); if (!(p >= 1024 && p <= 65535)) throw new Error('Port must be a number from 1024 to 65535.'); s.port = p; const props = await readProps(id); props['server-port'] = p; await writeProps(id, props); }
   return pub(await writeServer(s));
@@ -1370,7 +1390,7 @@ ipcMain.handle('maker:list', async () => {
 ipcMain.handle('maker:save', async (_e, mod) => {
   await fsp.mkdir(MM_ROOT(), { recursive: true });
   mod.updated = Date.now();
-  await fsp.writeFile(path.join(MM_ROOT(), `${mod.uid}.json`), JSON.stringify(mod));
+  await fsp.writeFile(path.join(MM_ROOT(), `${path.basename(String(mod.uid))}.json`), JSON.stringify(mod));
   return mod;
 });
 ipcMain.handle('maker:delete', (_e, uid) => fsp.rm(path.join(MM_ROOT(), `${path.basename(uid)}.json`), { force: true }));
@@ -1593,6 +1613,14 @@ function buildModFiles(mod, mc) {
     depends: { fabricloader: '>=0.15.0', minecraft: `>=1.21 <1.21.5`, 'fabric-resource-loader-v0': '*' },
   });
   put('pack.mcmeta', { pack: { pack_format: packFormat(mc), description: mod.name } });
+  // 🎨 Textures tab: bundle your own Create resource packs into the mod
+  for (const uid of (Array.isArray(mod.texturePacks) ? mod.texturePacks : []).slice(0, 20)) {
+    let pk; try { pk = JSON.parse(fs.readFileSync(path.join(CREATE_ROOT(), 'resourcepacks', `${path.basename(String(uid))}.json`), 'utf8')); } catch { continue; }
+    for (const [name, url] of Object.entries(pk.textures || {})) {
+      if (!/^[a-z0-9_/.-]+$/.test(name) || name.split('/').includes('..') || !String(url).startsWith('data:image/png;base64,')) continue;
+      put(`assets/minecraft/textures/${name}.png`, Buffer.from(url.split(',')[1], 'base64'));
+    }
+  }
   // Before 1.21, data pack folders were plural (functions/, advancements/, …)
   if (!newerOrSame(mc, '1.21')) {
     const renamed = {};
@@ -2914,3 +2942,290 @@ ipcMain.handle('storage:clean', async (_e, keys) => {
   for (const k of keys || []) for (const p of g[k]?.paths || []) { freed += await sizeOf(p); await fsp.rm(p, { recursive: true, force: true }); }
   return freed;
 });
+
+// ========== batch 3 ==========
+// ----- mod pages: full description, pictures, every version + changelog -----
+ipcMain.handle('mods:project', async (_e, { source, id, mcVersion, loader, type }) => {
+  if (type === 'texturepack') type = 'resourcepack';
+  type = typeOf(type);
+  if (source === 'curseforge') {
+    const h = cfHeaders();
+    const p = new URLSearchParams({ pageSize: '50' });
+    if (mcVersion && type !== 'modpack' && type !== 'world') p.set('gameVersion', mcVersion);
+    if (type === 'mod' && CF_LOADER[loader]) p.set('modLoaderType', String(CF_LOADER[loader]));
+    const [{ data: m }, desc, files] = await Promise.all([
+      getJSON(`${CF_BASE}/mods/${encodeURIComponent(id)}`, h),
+      getJSON(`${CF_BASE}/mods/${encodeURIComponent(id)}/description`, h).then(r => r.data).catch(() => ''),
+      getJSON(`${CF_BASE}/mods/${encodeURIComponent(id)}/files?${p}`, h).then(r => r.data).catch(() => []),
+    ]);
+    return {
+      body: String(desc || m.summary || ''), html: true,
+      gallery: (m.screenshots || []).slice(0, 12).map(x => ({ url: x.url, title: x.title || '' })),
+      links: { website: m.links?.websiteUrl || '', source: m.links?.sourceUrl || '', issues: m.links?.issuesUrl || '' },
+      updated: m.dateModified, created: m.dateCreated,
+      versions: files.map(f => ({ id: String(f.id), name: f.displayName, number: f.displayName, type: ['', 'release', 'beta', 'alpha'][f.releaseType] || 'release', date: f.fileDate, gameVersions: (f.gameVersions || []).filter(v => /^1\.\d+/.test(v)), loaders: (f.gameVersions || []).filter(v => /^[A-Z]/.test(v)).map(v => v.toLowerCase()), downloads: f.downloadCount })),
+    };
+  }
+  const p = new URLSearchParams();
+  if (mcVersion && type !== 'modpack') p.set('game_versions', JSON.stringify([mcVersion]));
+  if (type === 'mod' && loader && loader !== 'vanilla') p.set('loaders', JSON.stringify(loader === 'quilt' ? ['quilt', 'fabric'] : [loader]));
+  const [pr, vs] = await Promise.all([
+    getJSON(`https://api.modrinth.com/v2/project/${encodeURIComponent(id)}`),
+    getJSON(`https://api.modrinth.com/v2/project/${encodeURIComponent(id)}/version?${p}`).catch(() => []),
+  ]);
+  return {
+    body: String(pr.body || pr.description || ''), html: false,
+    gallery: (pr.gallery || []).slice(0, 12).map(g => ({ url: g.url, title: g.title || '' })),
+    links: { website: `https://modrinth.com/${pr.project_type}/${pr.slug}`, source: pr.source_url || '', issues: pr.issues_url || '', wiki: pr.wiki_url || '', discord: pr.discord_url || '' },
+    updated: pr.updated, created: pr.published,
+    versions: vs.slice(0, 60).map(v => ({ id: v.id, name: v.name, number: v.version_number, type: v.version_type, date: v.date_published, gameVersions: v.game_versions, loaders: v.loaders, downloads: v.downloads, changelog: String(v.changelog || '').slice(0, 20000) })),
+  };
+});
+ipcMain.handle('mods:changelog', async (_e, { source, id, versionId }) => {
+  if (source === 'curseforge') { const r = await getJSON(`${CF_BASE}/mods/${encodeURIComponent(id)}/files/${encodeURIComponent(versionId)}/changelog`, cfHeaders()).catch(() => ({ data: '' })); return { text: String(r.data || ''), html: true }; }
+  const v = await getJSON(`https://api.modrinth.com/v2/version/${encodeURIComponent(versionId)}`);
+  return { text: String(v.changelog || ''), html: false };
+});
+
+// ----- save any text (mod lists, crash reports…) -----
+ipcMain.handle('text:save', async (_e, { name, text }) => {
+  const r = await dialog.showSaveDialog(win, { title: 'Save', defaultPath: path.basename(String(name || 'p1xel-lab.txt')), filters: [{ name: 'Text', extensions: [String(name || '').split('.').pop() || 'txt'] }] });
+  if (r.canceled || !r.filePath) return null;
+  await fsp.writeFile(r.filePath, String(text || ''));
+  shell.showItemInFolder(r.filePath);
+  return path.basename(r.filePath);
+});
+
+// ----- worlds: import from a .zip, and download maps from CurseForge -----
+async function unzipWorld(id, zipPath, wantName) {
+  const zip = new AdmZip(zipPath);
+  const entries = zip.getEntries();
+  const lvl = entries.filter(e => !e.isDirectory && /(^|\/)level\.dat$/.test(e.entryName.replace(/\\/g, '/'))).sort((a, b) => a.entryName.length - b.entryName.length)[0];
+  if (!lvl) throw new Error('That .zip has no Minecraft world in it (no level.dat).');
+  const prefix = lvl.entryName.replace(/\\/g, '/').replace(/level\.dat$/, '');
+  const base = (wantName || prefix.split('/').filter(Boolean).pop() || path.basename(zipPath, '.zip')).replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim().slice(0, 60) || 'Imported world';
+  const saves = path.join(instDir(id), 'saves');
+  let name = base, n = 2;
+  while (fs.existsSync(path.join(saves, name))) name = `${base} (${n++})`;
+  const dest = path.join(saves, name);
+  for (const e of entries) {
+    const p = e.entryName.replace(/\\/g, '/');
+    if (e.isDirectory || !p.startsWith(prefix)) continue;
+    const out = safeJoin(dest, p.slice(prefix.length));
+    await fsp.mkdir(path.dirname(out), { recursive: true });
+    await fsp.writeFile(out, e.getData());
+  }
+  return name;
+}
+ipcMain.handle('worlds:import', async (_e, { id, file }) => {
+  if (running.has(id)) throw new Error('Close Minecraft first.');
+  if (!file) {
+    const r = await dialog.showOpenDialog(win, { title: 'Pick a world .zip', properties: ['openFile'], filters: [{ name: 'World', extensions: ['zip'] }] });
+    if (r.canceled) return null;
+    file = r.filePaths[0];
+  }
+  const name = await unzipWorld(id, file);
+  await syncDatapacks(id);
+  return name;
+});
+async function installWorldCF(instanceId, modId, fileId) {
+  const inst = await readInstance(instanceId);
+  if (running.has(inst.id)) throw new Error('Close Minecraft first.');
+  const h = cfHeaders();
+  const { data: mod } = await getJSON(`${CF_BASE}/mods/${encodeURIComponent(modId)}`, h);
+  let f;
+  if (fileId) f = (await getJSON(`${CF_BASE}/mods/${modId}/files/${encodeURIComponent(fileId)}`, h)).data;
+  else {
+    let files = (await getJSON(`${CF_BASE}/mods/${modId}/files?${new URLSearchParams({ gameVersion: inst.mcVersion, pageSize: '20' })}`, h)).data;
+    if (!files.length) files = (await getJSON(`${CF_BASE}/mods/${modId}/files?pageSize=20`, h)).data;
+    f = files.find(x => x.releaseType === 1) || files[0];
+  }
+  if (!f) throw new Error('This map has no download.');
+  const tmp = path.join(app.getPath('temp'), 'p1xel-worlds');
+  await fsp.mkdir(tmp, { recursive: true });
+  let zipFile;
+  send('mods:progress', { title: mod.name, stage: 'downloading' });
+  if (f.downloadUrl) { zipFile = path.join(tmp, `${Date.now()}.zip`); await download(f.downloadUrl, zipFile, x => send('mods:progress', { title: mod.name, stage: 'downloading', pct: x })); }
+  else { const e = await downloadFromCurseforgePage(inst, mod, f, 'world', tmp); zipFile = path.join(tmp, e.file); }
+  try {
+    const name = await unzipWorld(inst.id, zipFile, mod.name);
+    await syncDatapacks(inst.id);
+    send('mods:progress', null);
+    return { instance: inst, added: [], world: name, worldOk: !(f.gameVersions || []).some(v => /^1\./.test(v)) || (f.gameVersions || []).includes(inst.mcVersion), worldVersions: (f.gameVersions || []).filter(v => /^1\./.test(v)) };
+  } finally { await fsp.rm(zipFile, { force: true }); }
+}
+
+// ----- 🥔 Potato mode: settings for slow computers -----
+const POTATO = { renderDistance: '6', simulationDistance: '5', graphicsMode: '0', fancyGraphics: 'false', particles: '2', entityShadows: 'false', renderClouds: '"false"', mipmapLevels: '0', ao: 'false', biomeBlendRadius: '0', enableVsync: 'false', entityDistanceScaling: '0.5', maxFps: '120', 'soundCategory_ambient': '0.5' };
+ipcMain.handle('instances:potato', async (_e, { id, on }) => {
+  const inst = await readInstance(id);
+  const f = path.join(instDir(id), 'options.txt'), bak = f + '.p1xbak';
+  if (on) {
+    let text = fs.existsSync(f) ? await fsp.readFile(f, 'utf8') : '';
+    if (!fs.existsSync(bak)) await fsp.writeFile(bak, text);
+    const lines = text.split(/\r?\n/).filter(Boolean), seen = new Set();
+    const out = lines.map(l => { const k = l.split(':')[0]; if (k in POTATO) { seen.add(k); return `${k}:${POTATO[k]}`; } return l; });
+    for (const [k, v] of Object.entries(POTATO)) if (!seen.has(k)) out.push(`${k}:${v}`);
+    await fsp.writeFile(f, out.join('\n') + '\n');
+    inst.potato = true;
+  } else {
+    if (fs.existsSync(bak)) { const t = await fsp.readFile(bak, 'utf8'); if (t) await fsp.writeFile(f, t); else await fsp.rm(f, { force: true }); await fsp.rm(bak, { force: true }); }
+    inst.potato = false;
+  }
+  await writeInstance(inst);
+  return inst;
+});
+
+// ----- import a server you already have (folder or .zip) -----
+const importJobs = new Map();
+function detectServer(dir) {
+  const has = p => fs.existsSync(path.join(dir, p));
+  const ls = p => { try { return fs.readdirSync(path.join(dir, p)); } catch { return []; } };
+  const jars = ls('').filter(f => /\.jar$/i.test(f));
+  let loader = 'vanilla', mcVersion = null, software = 'Vanilla';
+  if (has('fabric-server-launch.jar') || has('.fabric') || jars.some(j => /^fabric-server/i.test(j))) { loader = 'fabric'; software = 'Fabric'; }
+  else if (has('libraries/net/neoforged')) { loader = 'neoforge'; software = 'NeoForge'; }
+  else if (has('libraries/net/minecraftforge') || jars.some(j => /^forge-/i.test(j))) { loader = 'forge'; software = 'Forge'; }
+  else if (jars.some(j => /^(paper|purpur|spigot|pufferfish|folia|leaf)/i.test(j)) || has('plugins') || has('bukkit.yml')) { loader = 'paper'; software = (jars.find(j => /^(paper|purpur|spigot|pufferfish)/i.test(j)) || 'paper').replace(/[-_.].*$/, '').replace(/^./, c => c.toUpperCase()); }
+  const ver = v => /^1\.\d+(\.\d+)?$/.test(v) ? v : null;
+  try { const vh = JSON.parse(fs.readFileSync(path.join(dir, 'version_history.json'), 'utf8')); mcVersion ||= ver((String(vh.currentVersion).match(/MC: (1\.[\d.]+)/) || [])[1]); } catch {}
+  if (!mcVersion) { const v = ls('libraries/net/minecraftforge/forge')[0]; if (v) mcVersion = ver(v.split('-')[0]); }
+  if (!mcVersion) { const v = ls('libraries/net/neoforged/neoforge').sort().pop(); if (v) { const [a, b] = v.split('.'); mcVersion = ver(b === '0' ? `1.${a}` : `1.${a}.${b}`); } }
+  if (!mcVersion) mcVersion = ver(ls('versions').filter(v => /^1\.\d+/.test(v)).sort(byVersionDesc)[0] || '');
+  if (!mcVersion) mcVersion = ver(ls('libraries/net/minecraft/server').filter(v => /^1\.\d+/.test(v)).sort(byVersionDesc)[0] || '');
+  if (!mcVersion) for (const j of ['server.jar', ...jars]) {
+    try { const e = new AdmZip(path.join(dir, j)).getEntry('version.json'); if (e) { const v = JSON.parse(e.getData().toString('utf8')); mcVersion = ver(v.id) || ver(v.name); if (mcVersion) break; } } catch {}
+  }
+  if (!mcVersion) for (const j of jars) { const m = j.match(/(?:^|[-_])(1\.\d+(?:\.\d+)?)(?=[-_.])/); if (m) { mcVersion = m[1]; break; } }
+  // What's inside
+  let props = {}; try { props = Object.fromEntries(fs.readFileSync(path.join(dir, 'server.properties'), 'utf8').split(/\r?\n/).filter(l => l && !l.startsWith('#') && l.includes('=')).map(l => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])); } catch {}
+  const lvl = props['level-name'] || 'world';
+  const count = (p, re) => ls(p).filter(f => re.test(f)).length;
+  const found = {
+    mods: count('mods', /\.jar$/i), plugins: count('plugins', /\.jar$/i), datapacks: count(`${lvl}/datapacks`, /\.zip$|^[^.]+$/i),
+    resourcepacks: count('resourcepacks', /\.zip$/i) + count('texturepacks', /\.zip$/i), shaders: count('shaderpacks', /\.zip$/i),
+    world: has(`${lvl}/level.dat`), serverPack: !!props['resource-pack'], properties: Object.keys(props).length > 0,
+  };
+  return { loader, software, mcVersion, motd: (props.motd || '').replace(/§./g, '').replace(/\\u00A7./gi, '').trim(), port: Number(props['server-port']) || 25565, found, level: lvl };
+}
+ipcMain.handle('servers:importScan', async (_e, { kind }) => {
+  let src;
+  if (kind === 'zip') {
+    const r = await dialog.showOpenDialog(win, { title: 'Pick your server .zip', properties: ['openFile'], filters: [{ name: 'Server zip', extensions: ['zip'] }] });
+    if (r.canceled) return null;
+    const tmp = path.join(app.getPath('temp'), 'p1xel-import', String(Date.now()));
+    await fsp.mkdir(tmp, { recursive: true });
+    const zip = new AdmZip(r.filePaths[0]);
+    const entries = zip.getEntries();
+    if (entries.length > 200000) throw new Error('That .zip is too big.');
+    for (const e of entries) {
+      if (e.isDirectory) continue;
+      const out = safeJoin(tmp, e.entryName.replace(/\\/g, '/'));
+      await fsp.mkdir(path.dirname(out), { recursive: true });
+      await fsp.writeFile(out, e.getData());
+    }
+    // A zip that holds one folder: use that folder
+    const top = (await fsp.readdir(tmp)).filter(f => !f.startsWith('__MACOSX'));
+    src = top.length === 1 && fs.statSync(path.join(tmp, top[0])).isDirectory() ? path.join(tmp, top[0]) : tmp;
+    src = Object.assign(new String(src), { temp: tmp });
+  } else {
+    const r = await dialog.showOpenDialog(win, { title: 'Pick your server folder', properties: ['openDirectory'] });
+    if (r.canceled) return null;
+    src = r.filePaths[0];
+    if (path.resolve(src).startsWith(path.resolve(SRV_ROOT()))) throw new Error('That server is already in P1xel Lab.');
+  }
+  const dir = String(src);
+  const looks = ['server.properties', 'eula.txt', 'mods', 'plugins', 'world', 'libraries'].some(p => fs.existsSync(path.join(dir, p))) || fs.readdirSync(dir).some(f => /\.jar$/i.test(f));
+  if (!looks) throw new Error("That doesn't look like a Minecraft server folder (no server.properties, mods, plugins or server .jar).");
+  const token = crypto.randomBytes(8).toString('hex');
+  importJobs.set(token, { dir, temp: src.temp || null });
+  return { token, name: path.basename(dir), ...detectServer(dir) };
+});
+ipcMain.handle('servers:importDo', async (_e, { token, name, loader, mcVersion, eula }) => {
+  const job = importJobs.get(token); if (!job) throw new Error('Pick the server again.');
+  if (!SERVER_LOADERS.includes(loader)) throw new Error('Pick the server type.');
+  if (!/^1\.\d+(\.\d+)?$/.test(mcVersion || '')) throw new Error('Pick the Minecraft version.');
+  const det = detectServer(job.dir);
+  const slug = (name || 'server').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'server';
+  let id = slug, n = 2;
+  while (fs.existsSync(srvDir(id))) id = `${slug}-${n++}`;
+  const dest = srvDir(id);
+  const skip = /(^|[\\/])(logs|crash-reports|cache|\.cache|debug|session\.lock)$/i;
+  await fsp.cp(job.dir, dest, { recursive: true, filter: f => !skip.test(f) && !/p1xel-server\.json$/.test(f) });
+  // Rename the server program to what P1xel Lab starts
+  const jars = (await fsp.readdir(dest)).filter(f => /\.jar$/i.test(f));
+  if (loader === 'paper' && !jars.includes('paper.jar')) { const j = jars.find(f => /^(paper|purpur|spigot|pufferfish|folia|leaf)/i.test(f)); if (j) await fsp.rename(path.join(dest, j), path.join(dest, 'paper.jar')); }
+  if (loader === 'vanilla' && !jars.includes('server.jar')) { const j = jars.find(f => /server|minecraft/i.test(f)); if (j) await fsp.rename(path.join(dest, j), path.join(dest, 'server.jar')); }
+  // Players' packs go into the Player Pack
+  const content = [];
+  const move = async (from, to, type) => {
+    const d = path.join(dest, from); if (!fs.existsSync(d)) return;
+    await fsp.mkdir(path.join(dest, to), { recursive: true });
+    for (const f of await fsp.readdir(d)) {
+      if (!TYPES[type === 'clientmod' ? 'mod' : type].ext.test(f)) continue;
+      if (from !== to) await fsp.rename(path.join(d, f), path.join(dest, to, f));
+      content.push({ source: 'file', projectId: f, title: f.replace(/\.(jar|zip)$/i, ''), icon: '', version: 'Imported', file: f, type });
+    }
+  };
+  await move('mods', 'mods', 'mod');
+  await move('plugins', 'plugins', 'plugin');
+  await move(`${det.level}/datapacks`, `${det.level}/datapacks`, 'datapack');
+  await move('resourcepacks', CLIENT_DIRS.resourcepack, 'resourcepack');
+  await move('texturepacks', CLIENT_DIRS.resourcepack, 'resourcepack');
+  await move('shaderpacks', CLIENT_DIRS.shader, 'shader');
+  await move('clientmods', CLIENT_DIRS.clientmod, 'clientmod');
+  for (const d of ['mods', 'plugins', 'client/shaderpacks', 'client/resourcepacks', 'client/mods', 'backups']) await fsp.mkdir(path.join(dest, d), { recursive: true });
+  const srv = { id, name: String(name || det.motd || 'Imported server').slice(0, 40), mcVersion, loader, ramMB: 4096, port: det.port, created: Date.now(), fromInstance: null, eula: !!eula, autoRestart: true, backupOnStop: false, icon: 'grass', content, imported: true };
+  await writeServer(srv);
+  if (!fs.existsSync(path.join(dest, 'server.properties'))) await writeProps(id, { motd: srv.name, 'server-port': srv.port, 'online-mode': 'true', 'level-name': 'world' });
+  importJobs.delete(token);
+  if (job.temp) await fsp.rm(job.temp, { recursive: true, force: true });
+  return pub(srv);
+});
+// Make an instance with the same version and mods, so you can join your server
+ipcMain.handle('servers:makeInstance', async (_e, id) => {
+  const s = await readServer(id);
+  const loader = ['fabric', 'forge', 'neoforge'].includes(s.loader) ? s.loader : 'vanilla';
+  const inst = await newInstanceFolder(`${s.name} (player)`, s.mcVersion, loader, null, s.icon || 'grass', { boosted: false });
+  const copy = async (fromDir, type) => {
+    const d = path.join(srvDir(id), fromDir); if (!fs.existsSync(d)) return 0;
+    let n = 0;
+    for (const f of await fsp.readdir(d)) {
+      if (!TYPES[type].ext.test(f)) continue;
+      await fsp.mkdir(path.join(instDir(inst.id), TYPES[type].dir), { recursive: true });
+      await fsp.copyFile(path.join(d, f), path.join(instDir(inst.id), TYPES[type].dir, f));
+      const known = s.content.find(c => c.file === f) || {};
+      inst.mods.push({ source: known.source || 'file', projectId: known.projectId || f, title: known.title || f.replace(/\.(jar|zip)$/i, ''), icon: known.icon || '', version: known.version || 'From server', file: f, type });
+      n++;
+    }
+    return n;
+  };
+  let mods = 0;
+  if (loader !== 'vanilla') { mods += await copy('mods', 'mod'); mods += await copy(CLIENT_DIRS.clientmod, 'mod'); }
+  await copy(CLIENT_DIRS.resourcepack, 'resourcepack');
+  if (loader !== 'vanilla') await copy(CLIENT_DIRS.shader, 'shader');
+  await writeInstance(inst);
+  return { instance: inst, mods };
+});
+
+// ----- automatic daily server backups (keeps the last 7) -----
+async function dailyBackups() {
+  if (!fs.existsSync(SRV_ROOT())) return;
+  for (const id of await fsp.readdir(SRV_ROOT())) {
+    try {
+      const s = await readServer(id);
+      if (!s.dailyBackup) continue;
+      if (Date.now() - (s.lastDaily || 0) < 23.5 * 3600000) continue;
+      const lvl = await levelName(id);
+      if (!fs.existsSync(path.join(srvDir(id), lvl, 'level.dat'))) continue;
+      await makeBackup(id, 'Daily');
+      s.lastDaily = Date.now(); await writeServer(s);
+      const d = path.join(srvDir(id), 'backups');
+      const daily = (await fsp.readdir(d)).filter(f => /_Daily\.zip$/.test(f)).sort();
+      for (const f of daily.slice(0, Math.max(0, daily.length - 7))) await fsp.rm(path.join(d, f), { force: true });
+      send('server:log', { id, text: '[P1xel Lab] 💾 Daily backup done.\n' });
+    } catch (e) { console.warn('daily backup', id, e.message); }
+  }
+}
+app.whenReady().then(() => { setTimeout(() => dailyBackups().catch(() => {}), 60000); setInterval(() => dailyBackups().catch(() => {}), 3600000); });
+ipcMain.handle('servers:dailyNow', () => dailyBackups());

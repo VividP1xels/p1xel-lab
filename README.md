@@ -37,6 +37,13 @@ A Minecraft: Java Edition launcher built for modding, by **[VividP1xels](https:/
 17. **Any color.** An RGB color picker (sliders, hex, recent colors) everywhere in Create, for Mod Maker item names, and for the launcher's own theme color.
 18. **Private sharing.** Send mods, packs and modpacks straight to a friend (📎 in chat, or Publish → Send privately). On Modrinth, choose Public, Unlisted or Private.
 19. **More.** Worlds tab (back up, open, delete), Screenshots gallery (post to your feed), one-click mod updates, and playtime for each instance.
+20. **🎛 Customize.** Background picture (with darken and blur), text size, font, square corners, compact mode, sidebar width, animations, button sounds, which sidebar buttons show, and which page opens first.
+21. **📥 Import a server.** Pick a server folder or `.zip`. P1xel Lab detects Vanilla, Paper/Purpur/Spigot, Fabric, Forge or NeoForge and the Minecraft version, then brings in the world, settings, mods, plugins, data packs, resource packs and texture packs. **🎮 Make instance** builds a matching instance so you can join.
+22. **Texture packs.** A Texture Packs category in Browse (filter by 16x, 32x, 64x…), a 🎨 Textures tab in Mod Maker that builds your own texture packs into a mod, and a 🎨 Retexture element in Advanced mode.
+23. **Mod pages.** Full description, pictures, every version with its changelog, and **install any older version** to roll back. Sort by Newest or Recently updated.
+24. **Collections, export and compare.** Save mods into collections and install a whole collection at once, export an instance's mod list, and compare two instances.
+25. **Worlds and maps.** Import a world `.zip`, or download maps from CurseForge (Browse → Worlds & Maps).
+26. **Instance pictures and folders, 🥔 Potato mode, crash helper** (explains crashes in plain English and offers fixes), **keyboard shortcuts** (F1 shows them), **profile badges**, and **automatic daily server backups**.
 
 ## Downloads
 

@@ -53,8 +53,8 @@ function home() {
 }
 
 // ---------- side panel ----------
-const KIND_ICON = { item: '💎', block: '🧱', food: '🍎', sword: '🗡', pickaxe: '⛏' };
-const BUILTIN = [['item', '💎 Item', 'Ingots, gems, anything'], ['block', '🧱 Block', 'A real new block'], ['food', '🍎 Food', 'With effects'], ['sword', '🗡 Sword', 'Custom damage'], ['pickaxe', '⛏ Pickaxe', 'Custom mining']];
+const KIND_ICON = { item: '💎', block: '🧱', food: '🍎', sword: '🗡', pickaxe: '⛏', retexture: '🎨' };
+const BUILTIN = [['item', '💎 Item', 'Ingots, gems, anything'], ['block', '🧱 Block', 'A real new block'], ['food', '🍎 Food', 'With effects'], ['sword', '🗡 Sword', 'Custom damage'], ['pickaxe', '⛏ Pickaxe', 'Custom mining'], ['retexture', '🎨 Retexture', 'Repaint any Minecraft texture']];
 async function renderSide() {
   st.plugins = await A.plugins();
   const els = st.meta?.elements || [];
@@ -77,7 +77,52 @@ $('#el-list').onclick = e => {
   if (hit) openFile(hit);
 };
 function findFile(nodes, test) { for (const n of nodes) { if (n.dir) { const r = findFile(n.children, test); if (r) return r; } else if (test(n.path)) return n.path; } return null; }
-$('#el-new').onclick = e => { const b = e.target.closest('[data-new]'); if (b) wizard(b.dataset.new); };
+$('#el-new').onclick = e => { const b = e.target.closest('[data-new]'); if (!b) return; b.dataset.new === 'retexture' ? retexture() : wizard(b.dataset.new); };
+
+// ---------- 🎨 Retexture: change how vanilla Minecraft things look, inside your mod ----------
+const RT_DIR = 'src/main/resources/assets/minecraft/textures/';
+async function retexture(pick) {
+  st.active = null; renderTabs();
+  const mc = st.meta?.mc || '1.21.1';
+  const mine = [];
+  (function walk(nodes) { for (const n of nodes) { if (n.dir) walk(n.children); else if (n.path.startsWith(RT_DIR) && n.path.endsWith('.png')) mine.push(n.path.slice(RT_DIR.length, -4)); } })(st.tree || []);
+  $('#adv-view').innerHTML = `<div class="wizard"><h2>🎨 Retexture</h2><p class="muted">Pick any Minecraft texture and paint over it. Your mod will change how it looks for everyone who installs it. Diamonds can be purple. Zombies can be pink. Your call.</p>
+    <div class="rt-grid"><div class="rt-side"><input id="rt-q" placeholder="🔍 Search (diamond, grass, zombie…)"><div class="rt-list" id="rt-list"><p class="fine">Loading Minecraft ${esc(mc)} textures… (the first time needs internet)</p></div>
+      ${mine.length ? `<b class="lbl">Already changed (${mine.length})</b><div class="rt-list mine">${mine.map(n => `<button data-rt="${esc(n)}">🎨 ${esc(n)}</button>`).join('')}</div>` : ''}</div>
+    <div id="rt-edit" class="rt-edit"><p class="fine">← Pick a texture</p></div></div></div>`;
+  let all = [];
+  const list = () => { const q = $('#rt-q').value.trim().toLowerCase(); const hits = all.filter(n => !q || n.includes(q)).slice(0, 200); $('#rt-list').innerHTML = hits.map(n => `<button data-rt="${esc(n)}">${esc(n)}</button>`).join('') || '<p class="fine">Nothing matches.</p>'; };
+  $('#adv-view').onclick = e => { const b = e.target.closest('[data-rt]'); if (b) edit(b.dataset.rt); };
+  $('#rt-q').oninput = list;
+  try { all = (await lab.creator.textures(mc)).filter(n => /^(item|block|entity|particle|painting|mob_effect)\//.test(n)); list(); }
+  catch (e) { $('#rt-list').innerHTML = `<p class="fine">Couldn't get Minecraft's textures: ${esc(errMsg(e))}</p>`; }
+  async function edit(name) {
+    const box = $('#rt-edit');
+    box.innerHTML = '<p class="fine">Loading…</p>';
+    let url;
+    const own = mine.includes(name);
+    try { url = own ? null : await lab.creator.texture({ mc, name }); } catch (e) { box.innerHTML = `<p class="fine">${esc(errMsg(e))}</p>`; return; }
+    if (own) { const r = await A.read({ project: st.cur, file: RT_DIR + name + '.png' }); url = r.image || r; }
+    const img = await new Promise(res => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = url; });
+    const size = Math.min(128, img?.width || 16);
+    if (img && img.height !== img.width) { const c = document.createElement('canvas'); c.width = c.height = img.width; c.getContext('2d').drawImage(img, 0, 0); url = c.toDataURL('image/png'); }
+    let color = '#7a2cff';
+    box.innerHTML = `<b>${esc(name)}</b> <small class="muted">${img ? `${img.width}×${img.height}` : ''}</small><canvas id="rt-cv" width="384" height="384"></canvas>
+      <div class="tools"><button class="chip on" data-t="pen">✏️ Pencil</button><button class="chip" data-t="erase">🧽 Eraser</button>${ColorPicker.swatch('rt-col', color)}<button class="chip" id="rt-orig">↺ Original</button></div>
+      <div class="dlg-row"><button class="btn btn-primary" id="rt-save">💾 Save into my mod</button>${own ? '<button class="btn btn-ghost danger" id="rt-del">Remove change</button>' : ''}</div>
+      ${img && img.height !== img.width ? '<p class="fine">This one is animated or a sheet: only the top square is shown.</p>' : ''}`;
+    const ed = pixelEditor($('#rt-cv'), size, url, () => color);
+    ColorPicker.bind($('#rt-col'), () => color, h => { color = h; });
+    box.querySelectorAll('[data-t]').forEach(b => { b.onclick = () => { ed.setTool(b.dataset.t); box.querySelectorAll('[data-t]').forEach(x => x.classList.toggle('on', x === b)); }; });
+    $('#rt-orig').onclick = async () => { try { ed.load(await lab.creator.texture({ mc, name })); } catch (e) { toast(errMsg(e), 'err'); } };
+    $('#rt-save').onclick = async () => {
+      await A.write({ project: st.cur, file: RT_DIR + name + '.png', image: ed.url() });
+      log(`✓ Retextured ${name}\n`, 'ok'); toast(`🎨 Saved! Build your mod to see it.`, 'ok');
+      const t = await A.tree(st.cur); st.meta = t.meta; st.tree = t.tree; renderSide(); retexture();
+    };
+    $('#rt-del') && ($('#rt-del').onclick = async () => { await A.remove({ project: st.cur, file: RT_DIR + name + '.png' }); const t = await A.tree(st.cur); st.meta = t.meta; st.tree = t.tree; renderSide(); retexture(); toast('Change removed'); });
+  }
+}
 
 // ---------- editor tabs ----------
 function renderTabs() {

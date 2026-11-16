@@ -45,3 +45,12 @@ body.adv { display: flex; flex-direction: column; height: 100vh; overflow: hidde
 .adv-top .btn-play { font-size: 13px; padding: 8px 14px; }
 .adv-top .btn { padding: 7px 12px; font-size: 13px; }
 .adv-top select { padding: 6px 8px; font-size: 13px; }
+
+/* Retexture */
+.rt-grid { display: grid; grid-template-columns: 260px 1fr; gap: 20px; margin-top: 12px; }
+.rt-side input { width: 100%; }
+.rt-list { max-height: 330px; overflow: auto; display: flex; flex-direction: column; margin: 8px 0 12px; border: 2px solid var(--line); border-radius: 4px; }
+.rt-list.mine { max-height: 160px; }
+.rt-list button { background: none; border: 0; border-bottom: 1px solid var(--line); color: var(--text); text-align: left; padding: 5px 8px; font: 12px Inter, sans-serif; cursor: pointer; }
+.rt-list button:hover { background: var(--panel2); color: var(--cyan); }
+.rt-edit canvas { display: block; width: 384px; height: 384px; image-rendering: pixelated; border: 2px solid var(--line); border-radius: 4px; cursor: crosshair; touch-action: none; margin: 8px 0; }

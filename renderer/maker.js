@@ -70,11 +70,11 @@
     }
     $('#mm-body').innerHTML = `
       <div class="tabs mm-tabs">
-        ${[['info', 'Info & icon'], ['commands', `Commands (${(M.cur.commands ||= []).length})`], ['items', `Custom items (${M.cur.items.length})`], ['tweaks', 'Gameplay'], ['build', 'Build & play']].map(([k, t]) => `<button class="tab ${M.tab === k ? 'active' : ''}" data-mtab="${k}">${t}</button>`).join('')}
+        ${[['info', 'Info & icon'], ['commands', `Commands (${(M.cur.commands ||= []).length})`], ['items', `Custom items (${M.cur.items.length})`], ['textures', `🎨 Textures (${(M.cur.texturePacks || []).length})`], ['tweaks', 'Gameplay'], ['build', 'Build & play']].map(([k, t]) => `<button class="tab ${M.tab === k ? 'active' : ''}" data-mtab="${k}">${t}</button>`).join('')}
       </div>
       <div id="mm-tab"></div>`;
     $('#mm-body .mm-tabs').onclick = e => { const t = e.target.closest('[data-mtab]'); if (t) { M.tab = t.dataset.mtab; render(); } };
-    ({ info: tabInfo, commands: tabCommands, items: tabItems, tweaks: tabTweaks, build: tabBuild })[M.tab]();
+    ({ info: tabInfo, commands: tabCommands, items: tabItems, textures: tabTextures, tweaks: tabTweaks, build: tabBuild })[M.tab]();
   }
   function renderItemsMode(v) {
     v.innerHTML = `
@@ -470,6 +470,28 @@
       if (e.target.id === 'kit-add') { (t.starterKit ||= []).push({ id: 'bread', count: 8 }); save(); render(); }
       if (e.target.dataset.krm) { t.starterKit.splice(+e.target.dataset.krm, 1); save(); render(); }
     };
+  }
+
+  // ---------- 🎨 textures: put your own texture packs inside the mod ----------
+  async function tabTextures() {
+    const packs = await lab.creator.list('rp').catch(() => []);
+    const on = new Set(M.cur.texturePacks || []);
+    $('#mm-tab').innerHTML = `<div class="srv-card"><b>🎨 Texture packs in this mod</b>
+      <p class="fine">Pick resource packs you made in <b>Create → 🎨 Resource Packs</b>. Their textures get built <b>into your mod</b>, so anyone who installs it sees your new look. No separate pack needed.</p>
+      ${packs.length ? `<div class="tex-list">${packs.map(p => { const t = Object.entries(p.textures || {}); return `<label class="tex-row ${on.has(p.uid) ? 'on' : ''}"><input type="checkbox" data-tp="${esc(p.uid)}" ${on.has(p.uid) ? 'checked' : ''}>
+        <div class="tex-prev">${t.slice(0, 6).map(([n, u]) => `<img src="${esc(u)}" title="${esc(n)}" alt="">`).join('') || '<i>empty</i>'}</div>
+        <div><b>${esc(p.name)}</b><small>${t.length} texture${t.length === 1 ? '' : 's'} · Minecraft ${esc(p.mcVersion || '?')}</small></div></label>`; }).join('')}</div>`
+      : '<p class="muted">You haven\'t made a texture pack yet.</p>'}
+      <div class="row"><button class="btn btn-ghost" id="tp-new">🎨 Make a texture pack</button></div>
+      <p class="fine">If two packs change the same texture, the one lower in the list wins.</p></div>`;
+    $('#mm-tab').onchange = e => {
+      const c = e.target.closest('[data-tp]'); if (!c) return;
+      const list = new Set(M.cur.texturePacks || []);
+      c.checked ? list.add(c.dataset.tp) : list.delete(c.dataset.tp);
+      M.cur.texturePacks = [...list]; c.closest('.tex-row').classList.toggle('on', c.checked); save();
+      $('#mm-body [data-mtab=textures]').textContent = `🎨 Textures (${M.cur.texturePacks.length})`;
+    };
+    $('#tp-new').onclick = () => Create.go('rp');
   }
 
   // ---------- build ----------

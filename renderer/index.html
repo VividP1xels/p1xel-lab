@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div id="custom-bg"></div>
   <div class="bg-grid"></div>
 
   <!-- 1. SIGN IN -->
@@ -104,6 +105,10 @@
         <svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges"><path fill="currentColor" d="M10 1h3v1h1v3h-1v1h-1v1h-1v1h-1v1H9v1H8v1H7v1H6v1H5v1H4v1H1v-3h1v-1h1v-1h1V9h1V8h1V7h1V6h1V5h1V4h1V3h1V2h1z"/></svg>
         Create
       </button>
+      <button class="nav-btn" id="nav-custom" data-view="custom">
+        <svg viewBox="0 0 16 16" width="18" height="18" shape-rendering="crispEdges"><path fill="currentColor" d="M3 1h2v4h1v2H5v8H3V7H2V5h1zM11 1h2v8h1v2h-1v4h-2v-4h-1V9h1zM7 1h2v2h1v2H9v10H7V5H6V3h1z"/></svg>
+        Customize
+      </button>
       <div class="side-label">Instances <button class="icon-btn" id="btn-new" title="New instance">+</button></div>
       <nav id="inst-list" class="inst-list"></nav>
       <div class="side-bottom">
@@ -158,8 +163,10 @@
             <button data-type="mod" class="active">🧩 Mods</button>
             <button data-type="shader">✨ Shaders</button>
             <button data-type="resourcepack">🎨 Resource Packs</button>
+            <button data-type="texturepack">🖼 Texture Packs</button>
             <button data-type="datapack">📜 Data Packs</button>
             <button data-type="modpack">📦 Modpacks</button>
+            <button data-type="world">🗺 Worlds &amp; Maps</button>
           </div>
           <div class="search-row">
             <div class="source-toggle" id="src-toggle">
@@ -167,7 +174,8 @@
               <button data-src="curseforge"><i class="dot cf"></i>CurseForge</button>
             </div>
             <input id="m-query" placeholder="Search mods… (e.g. sodium, jei, create)">
-            <select id="m-sort"><option value="relevance">Relevance</option><option value="downloads">Most downloaded</option></select>
+            <select id="m-sort"><option value="relevance">Relevance</option><option value="downloads">Most downloaded</option><option value="newest">Newest</option><option value="updated">Recently updated</option></select>
+            <button class="btn btn-ghost" id="m-colls" title="Your mod collections">📚</button>
           </div>
           <div class="chips cat-chips" id="cat-chips"></div>
           <div class="filter-row"><p class="filter-note" id="filter-note"></p><label class="check sm"><input type="checkbox" id="m-any"> Show results for every version &amp; loader</label></div>
@@ -181,7 +189,7 @@
         </div>
 
         <div class="tab-body hidden" id="tab-installed">
-          <div class="add-files"><button class="btn btn-ghost" id="add-jar">+ Add .jar file</button><button class="btn btn-ghost" id="check-upd">⬆ Check for updates</button><span class="muted">Got a mod from another website or Discord? Add it here, or drag the file onto this window.</span></div>
+          <div class="add-files"><button class="btn btn-ghost" id="add-jar">+ Add .jar file</button><button class="btn btn-ghost" id="check-upd">⬆ Check for updates</button><button class="btn btn-ghost" id="i-export" title="Save a list of everything in this instance">📤 Export list</button><button class="btn btn-ghost" id="i-compare" title="See what is different between two instances">⚖ Compare</button><button class="btn btn-ghost" id="i-coll" title="Save these mods as a collection">📚 Save as collection</button><span class="muted">Got a mod from another website or Discord? Add it here, or drag the file onto this window.</span></div>
           <div id="installed-list" class="installed"></div>
         </div>
         <div class="tab-body hidden" id="tab-worlds"></div>
@@ -196,6 +204,7 @@
       <div id="profile-view" class="hidden"></div>
       <div id="maker-view" class="hidden"></div>
       <div id="publish-view" class="hidden"></div>
+      <div id="custom-view" class="hidden"></div>
       <div id="friends-view" class="hidden">
         <div class="friends">
           <div class="f-left">
@@ -221,6 +230,8 @@
   </dialog>
 
   <dialog id="profile-dlg" class="profile-dlg"></dialog>
+  <dialog id="gen-dlg"></dialog>
+  <dialog id="page-dlg" class="page-dlg"></dialog>
 
   <!-- NOTIFICATIONS -->
   <div class="notif-panel hidden" id="notif-panel">
@@ -296,5 +307,6 @@
   <script src="creator.js"></script>
   <script src="publish.js"></script>
   <script src="profile.js"></script>
+  <script src="extras.js"></script>
 </body>
 </html>

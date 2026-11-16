@@ -31,12 +31,13 @@
       <div class="srv-head">
         <div><h2 class="pix">Servers</h2>
         <p class="muted">Free servers that run on <b>this computer</b> while P1xel Lab is open. Your PC has <b>${gbTxt(S.info.totalRamMB)}</b> of RAM. A server can use up to <b>${gbTxt(S.info.maxRamMB)}</b>, and the rest is left for Windows.</p></div>
-        <div class="row"><button class="btn btn-ghost" id="srv-pack">📦 New from modpack</button><button class="btn btn-primary" id="srv-new">+ New server</button></div>
+        <div class="row"><button class="btn btn-ghost" id="srv-import" title="Bring in a server you already have, with its mods, plugins and packs">📥 Import server</button><button class="btn btn-ghost" id="srv-pack">📦 New from modpack</button><button class="btn btn-primary" id="srv-new">+ New server</button></div>
       </div>
       <div class="srv-tabs">${S.list.map(s => `<button class="srv-tab ${s.id === S.active && !S.creating ? 'active' : ''}" data-srv="${esc(s.id)}"><i class="status-dot ${s.status === 'running' ? 'online' : s.status === 'starting' ? 'playing' : ''}"></i>${esc(s.name)}</button>`).join('')}</div>
       <div id="srv-body"></div>`;
     $('#srv-new').onclick = () => { S.creating = true; render(); };
     $('#srv-pack').onclick = packServer;
+    $('#srv-import').onclick = importServer;
     v.querySelector('.srv-tabs').onclick = e => { const b = e.target.closest('[data-srv]'); if (b) { S.active = b.dataset.srv; S.creating = false; S.tab = 'overview'; S.props = null; render(); } };
     S.creating ? renderCreate() : renderServer();
     const running = S.list.filter(s => s.status !== 'stopped').length;
@@ -124,6 +125,49 @@
       } catch (e) { toast(errMsg(e), 'err'); b.disabled = false; b.textContent = 'Create server'; }
     };
   }
+  // ---------- import a server you already have ----------
+  async function importServer() {
+    const d = $('#gen-dlg'); d.className = '';
+    d.innerHTML = `<div class="dlg"><h3 class="pix">📥 Import a server</h3><p class="muted">Already have a Minecraft server? P1xel Lab brings in <b>everything</b>: the world, settings, <b>mods, plugins, data packs, resource packs and texture packs</b>.</p>
+      <div class="imp-pick"><button class="btn btn-primary" data-k="folder">📁 Pick the server folder</button><button class="btn btn-ghost" data-k="zip">🗜 Pick a .zip</button></div>
+      <p class="fine">Got it from a host like Aternos or Minehut? Download the server files as a .zip first.</p>
+      <div class="dlg-row end"><button class="btn btn-ghost" data-x>Cancel</button></div></div>`;
+    if (!d.open) d.showModal();
+    d.querySelector('[data-x]').onclick = () => d.close();
+    d.querySelectorAll('[data-k]').forEach(b => { b.onclick = async () => {
+      b.disabled = true; b.textContent = 'Looking at it…';
+      let r;
+      try { r = await lab.servers.importScan({ kind: b.dataset.k }); } catch (e) { toast(errMsg(e), 'err'); }
+      if (!r) { d.close(); return; }
+      const vers = await lab.versions(false).catch(() => []);
+      const list = vers.map(v => v.id || v);
+      if (r.mcVersion && !list.includes(r.mcVersion)) list.unshift(r.mcVersion);
+      const f = r.found, bits = [[f.mods, '🧩 mods'], [f.plugins, '🔌 plugins'], [f.datapacks, '📜 data packs'], [f.resourcepacks, '🎨 resource/texture packs'], [f.shaders, '✨ shaders']].filter(([n]) => n).map(([n, t]) => `<span class="tag">${n} ${t}</span>`).join('');
+      d.innerHTML = `<div class="dlg"><h3 class="pix">📥 Import "${esc(r.name)}"</h3>
+        <p class="muted">P1xel Lab thinks this is a <b>${esc(r.software)}</b> server${r.mcVersion ? ` for <b>Minecraft ${esc(r.mcVersion)}</b>` : ''}. Fix it below if that's wrong.</p>
+        <div class="tags imp-found">${bits || '<span class="tag">No mods or plugins</span>'}${f.world ? '<span class="tag">🌍 world</span>' : ''}${f.serverPack ? '<span class="tag">📦 server resource pack</span>' : ''}${f.properties ? '<span class="tag">⚙ settings</span>' : ''}</div>
+        <label class="field"><span>Name</span><input id="imp-name" maxlength="40" value="${esc(r.motd || r.name)}"></label>
+        <div class="row2"><label class="field"><span>Type</span><select id="imp-type">${Object.entries(SERVER_TYPES).map(([k, t]) => `<option value="${k}" ${k === r.loader ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+        <label class="field"><span>Minecraft version</span><select id="imp-ver">${r.mcVersion ? '' : '<option value="">Pick one…</option>'}${list.map(v => `<option ${v === r.mcVersion ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></label></div>
+        <label class="check"><input type="checkbox" id="imp-eula"> I agree to the <a href="#" data-url="https://aka.ms/MinecraftEULA">Minecraft EULA</a></label>
+        <label class="check"><input type="checkbox" id="imp-inst" checked> Also make a matching instance so I can join it</label>
+        <p class="fine">Your original files aren't changed. P1xel Lab makes its own copy.</p>
+        <div class="dlg-row end"><button class="btn btn-ghost" data-x>Cancel</button><button class="btn btn-primary" id="imp-go">📥 Import</button></div></div>`;
+      d.querySelector('[data-x]').onclick = () => d.close();
+      $('#imp-go').onclick = async () => {
+        if (!$('#imp-ver').value) return toast('Pick the Minecraft version.', 'err');
+        if (!$('#imp-eula').checked) return toast('You need to agree to the Minecraft EULA to run a server.', 'err');
+        const g = $('#imp-go'); g.disabled = true; g.textContent = 'Copying…';
+        try {
+          const srv = await lab.servers.importDo({ token: r.token, name: $('#imp-name').value.trim() || r.name, loader: $('#imp-type').value, mcVersion: $('#imp-ver').value, eula: true });
+          let msg = `📥 Imported ${srv.name} with ${srv.content.length} mods, plugins and packs!`;
+          if ($('#imp-inst').checked) { const m = await lab.servers.makeInstance(srv.id); state.instances = await lab.listInstances(); renderSidebar(); msg += ` Made the instance "${m.instance.name}" too.`; }
+          d.close(); S.active = srv.id; S.creating = false; S.tab = 'overview'; await open(); toast(msg, 'ok');
+          Notes.add({ kind: 'game', title: `Imported ${srv.name}`, body: msg });
+        } catch (e) { toast(errMsg(e), 'err'); g.disabled = false; g.textContent = '📥 Import'; }
+      };
+    }; });
+  }
   async function packServer() {
     const pick = confirm('Make a server from a Modrinth modpack file (.mrpack)?\n\nTip: to use a modpack from search, install it as an instance first, then make a server "Same as" that instance.');
     if (!pick) return;
@@ -146,6 +190,7 @@
         <div class="srv-top">
           <div class="srv-title"><span class="inst-icon">${Pixels.block(s.icon || 'grass', 44)}</span><div><h3>${esc(s.name)}</h3><div class="tags"><span class="tag">Minecraft ${esc(s.mcVersion)}</span><span class="tag ${s.loader}">${SNAME[s.loader]}</span><span class="tag">${gbTxt(effRam(s))} RAM${s.ramMB === 'unlimited' ? ' ♾' : ''}</span><span class="tag srv-st ${st}">${STATUS[st]}${st === 'running' ? ` · ${s.players?.length || 0} online` : ''}</span>${s.anyVersion ? '<span class="tag">🌐 Any version</span>' : ''}</div></div></div>
           <div class="inst-actions">
+            <button class="btn btn-ghost" id="sv-inst" title="Make an instance with the same version and mods, so you can join">🎮 Make instance</button>
             ${st === 'stopped' ? '<button class="btn btn-play" id="sv-start">▶ START</button>' : `<button class="btn btn-ghost" id="sv-restart" ${st === 'running' ? '' : 'disabled'}>↻ Restart</button><button class="btn btn-ghost danger" id="sv-stop">■ Stop</button>`}
           </div>
         </div>
@@ -156,6 +201,7 @@
     $('#srv-body .tabs').onclick = e => { const t = e.target.closest('[data-stab]'); if (t) { S.tab = t.dataset.stab; renderServer(); } };
     $('#sv-start') && ($('#sv-start').onclick = async () => { s.status = 'starting'; render(); try { await lab.servers.start(s.id); } catch (e) { toast(errMsg(e), 'err'); s.status = 'stopped'; render(); } });
     $('#sv-stop') && ($('#sv-stop').onclick = () => { lab.servers.stop(s.id); toast('Stopping and saving the world…'); });
+    $('#sv-inst').onclick = async () => { try { const m = await lab.servers.makeInstance(s.id); state.instances = await lab.listInstances(); renderSidebar(); toast(`🎮 Made "${m.instance.name}" with ${m.mods} mods. Open it and press Play, then join your server!`, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } };
     $('#sv-restart') && ($('#sv-restart').onclick = () => { lab.servers.restart(s.id).catch(e => toast(errMsg(e), 'err')); toast('Restarting…'); });
     ({ overview: tabOverview, console: tabConsole, players: tabPlayers, content: tabContent, settings: tabSettings, backups: tabBackups })[S.tab](s);
   }
@@ -333,6 +379,7 @@
         <div class="srv-box"><b>Safety</b>
           <label class="check"><input type="checkbox" id="st-auto" ${s.autoRestart !== false ? 'checked' : ''}> Restart automatically if it crashes</label>
           <label class="check"><input type="checkbox" id="st-bk" ${s.backupOnStop ? 'checked' : ''}> Back up the world every time it stops</label>
+          <label class="check"><input type="checkbox" id="st-daily" ${s.dailyBackup ? 'checked' : ''}> 💾 Back up automatically every day (keeps the last 7)</label>
           <div class="row"><button class="btn btn-ghost" id="st-folder">Open folder</button><button class="btn btn-ghost danger" id="st-del" ${s.status === 'stopped' ? '' : 'disabled'}>Delete server</button></div>
         </div>
       </div>
@@ -353,7 +400,7 @@
       try {
         const { __id, ...set } = p;
         await lab.servers.props({ id: s.id, set });
-        const r = await lab.servers.update({ id: s.id, name: $('#st-name').value.trim() || s.name, port: $('#st-port').value, autoRestart: $('#st-auto').checked, backupOnStop: $('#st-bk').checked });
+        const r = await lab.servers.update({ id: s.id, name: $('#st-name').value.trim() || s.name, port: $('#st-port').value, autoRestart: $('#st-auto').checked, backupOnStop: $('#st-bk').checked, dailyBackup: $('#st-daily').checked });
         Object.assign(s, r); S.props = null;
         toast(s.status === 'stopped' ? 'Settings saved!' : 'Saved! Restart the server to use the new settings.', 'ok'); render();
       } catch (e) { toast(errMsg(e), 'err'); }

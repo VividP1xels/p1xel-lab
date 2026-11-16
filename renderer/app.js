@@ -7,11 +7,13 @@ const YT = 'https://www.youtube.com/@VividP1xels';
 const LOADER_NAME = { fabric: 'Fabric', quilt: 'Quilt', forge: 'Forge', neoforge: 'NeoForge', vanilla: 'Vanilla' };
 
 const state = { user: null, settings: {}, instances: [], current: null, source: 'modrinth', type: 'mod', results: [], offset: 0, total: 0, firstRun: false };
-const TYPE_NAME = { mod: 'mods', shader: 'shaders', resourcepack: 'resource packs', datapack: 'data packs', modpack: 'modpacks' };
-const TYPE_ONE = { mod: 'Mod', shader: 'Shader', resourcepack: 'Resource pack', datapack: 'Data pack', modpack: 'Modpack' };
-const PLACEHOLDER = { mod: 'Search mods… (e.g. sodium, jei, create)', shader: 'Search shaders… (e.g. complementary, bsl)', resourcepack: 'Search resource packs… (e.g. faithful, fresh animations)', datapack: 'Search data packs… (e.g. vanilla tweaks, terralith)', modpack: 'Search modpacks… (e.g. horror, skyblock, create)' };
+const TYPE_NAME = { mod: 'mods', shader: 'shaders', resourcepack: 'resource packs', texturepack: 'texture packs', datapack: 'data packs', modpack: 'modpacks', world: 'worlds & maps' };
+const TYPE_ONE = { mod: 'Mod', shader: 'Shader', resourcepack: 'Resource pack', texturepack: 'Texture pack', datapack: 'Data pack', modpack: 'Modpack', world: 'World' };
+const PLACEHOLDER = { mod: 'Search mods… (e.g. sodium, jei, create)', shader: 'Search shaders… (e.g. complementary, bsl)', resourcepack: 'Search resource packs… (e.g. faithful, fresh animations)', datapack: 'Search data packs… (e.g. vanilla tweaks, terralith)', modpack: 'Search modpacks… (e.g. horror, skyblock, create)', texturepack: 'Search texture packs… (e.g. faithful, bare bones, 32x)', world: 'Search worlds & maps… (e.g. parkour, horror map, skyblock)' };
 // Which kinds of things an instance can use
-const typesFor = inst => inst.loader === 'vanilla' ? ['resourcepack', 'datapack', 'modpack'] : ['mod', 'shader', 'resourcepack', 'datapack', 'modpack'];
+const typesFor = inst => inst.loader === 'vanilla' ? ['resourcepack', 'texturepack', 'datapack', 'modpack', 'world'] : ['mod', 'shader', 'resourcepack', 'texturepack', 'datapack', 'modpack', 'world'];
+// An instance's icon: your own picture, or a pixel block
+const instIcon = (i, size) => i.iconImage ? `<img class="inst-pic" src="${esc(i.iconImage)}" width="${size}" height="${size}" alt="">` : Pixels.block(i.icon, size);
 
 function toast(msg, kind = '') {
   const t = document.createElement('div');
@@ -162,7 +164,7 @@ $('#btn-new').onclick = () => openCreate(false);
 $('#empty-new').onclick = () => openCreate(false);
 
 // ---------- views (instance / friends / servers / mod maker) ----------
-const VIEWS = ['inst-view', 'empty-state', 'friends-view', 'servers-view', 'maker-view', 'publish-view', 'profile-view'];
+const VIEWS = ['inst-view', 'empty-state', 'friends-view', 'servers-view', 'maker-view', 'publish-view', 'profile-view', 'custom-view'];
 function showView(v) {
   if (v !== 'friends') Social.close();
   VIEWS.forEach(id => $('#' + id).classList.add('hidden'));
@@ -173,7 +175,9 @@ function showView(v) {
   if (v === 'maker') Create.open();
   if (v === 'publish') Publish.open();
   if (v === 'profile') Profile.open();
+  if (v === 'custom') Extras.openCustomize();
 }
+$('#nav-custom').onclick = () => showView('custom');
 $('#nav-profile').onclick = () => showView('profile');
 $('#acc-skin').onclick = () => { showView('maker'); Create.go('skin'); };
 $('#nav-publish').onclick = () => showView('publish');
@@ -186,24 +190,36 @@ function openMain(selectId) {
   renderSidebar();
   const id = selectId || state.current?.id || state.instances[0]?.id;
   if (id) selectInstance(id); else { $('#inst-view').classList.add('hidden'); $('#empty-state').classList.remove('hidden'); }
+  if (!selectId) Extras.startView();
 }
 function renderSidebar() {
-  $('#inst-list').innerHTML = state.instances.map(i => `
+  const item = i => `
     <div class="inst-item ${state.current?.id === i.id ? 'active' : ''}" data-id="${esc(i.id)}">
-      <span class="inst-icon">${Pixels.block(i.icon, 34)}</span>
-      <div><b>${i.favorite ? '<i class="fav">★</i> ' : ''}${esc(i.name)}</b><small>${esc(i.mcVersion)} · ${LOADER_NAME[i.loader] || i.loader}</small></div>
-    </div>`).join('');
+      <span class="inst-icon">${instIcon(i, 34)}</span>
+      <div><b>${i.favorite ? '<i class="fav">★</i> ' : ''}${esc(i.name)}</b><small>${esc(i.mcVersion)} · ${LOADER_NAME[i.loader] || i.loader}${i.potato ? ' · 🥔' : ''}</small></div>
+    </div>`;
+  // Instance folders
+  const groups = [...new Set(state.instances.map(i => i.group).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  let closed = []; try { closed = JSON.parse(localStorage.getItem('p1xellab-closed-groups') || '[]'); } catch {}
+  $('#inst-list').innerHTML = state.instances.filter(i => !i.group).map(item).join('') + groups.map(g => {
+    const list = state.instances.filter(i => i.group === g), shut = closed.includes(g) && !list.some(i => i.id === state.current?.id);
+    return `<div class="inst-group ${shut ? 'shut' : ''}"><button class="inst-gh" data-group="${esc(g)}">${shut ? '▸' : '▾'} 📁 ${esc(g)} <small>${list.length}</small></button><div class="inst-gb">${list.map(item).join('')}</div></div>`;
+  }).join('');
 }
-$('#inst-list').onclick = e => { const it = e.target.closest('.inst-item'); if (it) selectInstance(it.dataset.id); };
+$('#inst-list').onclick = e => {
+  const g = e.target.closest('[data-group]');
+  if (g) { let c = []; try { c = JSON.parse(localStorage.getItem('p1xellab-closed-groups') || '[]'); } catch {} const k = g.dataset.group; c = c.includes(k) ? c.filter(x => x !== k) : [...c, k]; try { localStorage.setItem('p1xellab-closed-groups', JSON.stringify(c)); } catch {} return renderSidebar(); }
+  const it = e.target.closest('.inst-item'); if (it) selectInstance(it.dataset.id);
+};
 
 async function selectInstance(id) {
   Social.close();
   $$('.nav-btn[data-view]').forEach(b => b.classList.remove('active'));
-  ['servers-view', 'maker-view', 'publish-view', 'profile-view'].forEach(v => $('#' + v).classList.add('hidden'));
+  ['servers-view', 'maker-view', 'publish-view', 'profile-view', 'custom-view'].forEach(v => $('#' + v).classList.add('hidden'));
   state.current = await lab.getInstance(id);
   const i = state.current;
   $('#empty-state').classList.add('hidden'); $('#inst-view').classList.remove('hidden');
-  $('#iv-icon').innerHTML = Pixels.block(i.icon, 64);
+  $('#iv-icon').innerHTML = instIcon(i, 64);
   $('#iv-name').textContent = i.name;
   updateFav(); updateQuick();
   $('#iv-ver').textContent = 'Minecraft ' + i.mcVersion;
@@ -235,10 +251,12 @@ const fmtBytes = b => b > 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : b >
 async function renderWorlds() {
   const id = state.current.id, box = $('#tab-worlds');
   const list = await lab.worlds.list(id);
-  box.innerHTML = `<div class="add-files"><button class="btn btn-ghost" id="w-open">📂 Open saves folder</button><span class="muted">Worlds you make in this instance show up here.</span></div>
+  box.innerHTML = `<div class="add-files"><button class="btn btn-ghost" id="w-import">📥 Import a world (.zip)</button><button class="btn btn-ghost" id="w-open">📂 Open saves folder</button><span class="muted">Worlds you make in this instance show up here. Want maps? <a href="#" id="w-maps">Browse Worlds &amp; Maps</a></span></div>
     <div class="results">${list.length ? list.map(w => `<div class="mod world">${w.icon ? `<img src="${w.icon}" alt="">` : '<div class="noimg"></div>'}<div class="body"><h4>${esc(w.name)}</h4><span class="by">Last played ${new Date(w.played).toLocaleString()} · ${fmtBytes(w.size)}</span>
       <div class="foot"><button class="btn btn-ghost sm" data-wact="backup" data-w="${esc(w.name)}">💾 Back up</button><button class="btn btn-ghost sm" data-wact="open" data-w="${esc(w.name)}">📂 Folder</button><button class="btn btn-ghost sm danger" data-wact="delete" data-w="${esc(w.name)}">Delete</button></div></div></div>`).join('') : '<div class="loading">No worlds yet. Press Play and make one!</div>'}</div>`;
   $('#w-open').onclick = () => lab.worlds.open({ id });
+  $('#w-import').onclick = async () => { try { const n = await lab.worlds.import({ id }); if (n) { toast(`📥 Imported "${n}"!`, 'ok'); renderWorlds(); updateQuick(); } } catch (e) { toast(errMsg(e), 'err'); } };
+  $('#w-maps').onclick = e => { e.preventDefault(); state.type = 'world'; $$('#type-chips [data-type]').forEach(b => b.classList.toggle('active', b.dataset.type === 'world')); setTab('browse'); search(true); };
   box.insertAdjacentHTML('beforeend', '<div id="w-rules"></div>');
   if (verGE(state.current.mcVersion, '1.13')) gameruleForm($('#w-rules'), state.current.gamerules || {}, state.current.mcVersion, async rules => {
     try { const r = await lab.gamerules.setInstance({ id, rules }); state.current = r.instance; toast(r.applied ? `Saved ${r.applied} game rule${r.applied > 1 ? 's' : ''}. They apply to every world in this instance.` : 'Game rules reset to normal.', 'ok'); }
@@ -353,14 +371,16 @@ async function search(reset) {
   $('#m-query').placeholder = PLACEHOLDER[state.type];
   if (!(CATS[state.type] || []).some(([k]) => k === state.cat) && state.cat !== 'horror') state.cat = '';
   renderCats();
-  $('#m-any').parentElement.classList.toggle('hidden', state.type === 'modpack');
+  $('#m-any').parentElement.classList.toggle('hidden', state.type === 'modpack' || state.type === 'world');
+  if (state.type === 'world' && state.source !== 'curseforge') { state.source = 'curseforge'; $$('#src-toggle button').forEach(x => x.classList.toggle('active', x.dataset.src === 'curseforge')); }
   if (reset) { state.offset = 0; state.results = []; $('#results').innerHTML = '<div class="loading">Searching…</div>'; }
   const srcName = state.source === 'modrinth' ? 'Modrinth' : 'CurseForge';
   $('#filter-note').innerHTML = state.type === 'modpack'
     ? `Showing <b>${srcName}</b> modpacks. Installing one makes a <b>new instance</b> with everything set up.`
     : state.type === 'mod'
       ? `Showing <b>${srcName}</b> mods that work with <b>Minecraft ${esc(i.mcVersion)}</b> + <b>${LOADER_NAME[i.loader]}</b>`
-      : `Showing <b>${srcName}</b> ${TYPE_NAME[state.type]} for <b>Minecraft ${esc(i.mcVersion)}</b>${state.type === 'datapack' ? '. They get added to every world in this instance.' : state.type === 'shader' ? '. Iris (the shader mod) is added for you.' : ''}`;
+      : state.type === 'world' ? `Showing <b>CurseForge</b> worlds &amp; maps for <b>Minecraft ${esc(i.mcVersion)}</b>. Installing one adds it to this instance's worlds.`
+      : `Showing <b>${srcName}</b> ${TYPE_NAME[state.type]} for <b>Minecraft ${esc(i.mcVersion)}</b>${state.type === 'datapack' ? '. They get added to every world in this instance.' : state.type === 'shader' ? '. Iris (the shader mod) is added for you.' : state.type === 'texturepack' ? '. Pick a resolution: 16x looks like normal Minecraft, higher is sharper (and needs a faster PC).' : ''}`;
   $('#cf-key-box').classList.add('hidden');
   try {
     const query = $('#m-query').value.trim();
@@ -371,7 +391,7 @@ async function search(reset) {
     const category = state.cat && state.cat !== 'horror' ? state.cat : undefined;
     let r = await lab.searchMods({ source: state.source, query: q2, mcVersion: i.mcVersion, loader: i.loader, offset: state.offset, sort: $('#m-sort').value, anyVersion: any, type, category });
     // Nothing for this version? Look everywhere so you can see where the mod is available.
-    if (reset && !any && query && !r.hits.length && !r.offline && type !== 'modpack') {
+    if (reset && !any && query && !r.hits.length && !r.offline && type !== 'modpack' && type !== 'world') {
       const all = await lab.searchMods({ source: state.source, query, offset: 0, sort: $('#m-sort').value, anyVersion: true, type });
       if (all.hits.length) { r = all; any = true; state.autoAny = true; }
     } else if (reset) state.autoAny = false;
@@ -416,6 +436,7 @@ function renderResults() {
         <div class="desc">${esc(h.description)}</div>
         ${!fits(h) ? (() => { const sg = suggestFor(h); return `<div class="nofit">⚠ Not for ${esc(state.current.mcVersion)} ${LOADER_NAME[state.current.loader]}. Works on ${esc(LOADER_NAME[sg.loader] || sg.loader)} ${esc(sg.mcVersion)}${h.gameVersions?.length > 1 ? ' and more' : ''}</div>`; })() : ''}
         <div class="foot">${h.categories.map(c => `<span class="cat">${esc(c)}</span>`).join('')}
+          <button class="mini coll-add" data-coll="${idx}" title="Add to a collection">📚</button>
           ${isInstalled(h) ? '<button class="btn ok" disabled>✓ Installed</button>'
             : state.offline ? '<button class="btn" disabled title="Connect to the internet to install">Needs internet</button>'
             : !fits(h) ? `<button class="btn btn-ghost" data-newinst="${idx}" title="Make a new instance this mod works in">Make instance for it</button>`
@@ -427,6 +448,7 @@ function renderResults() {
   $('#m-more').classList.toggle('hidden', state.offset >= state.total);
 }
 function showModDetails(h) {
+  if (window.Extras) return Extras.modPage(h);
   const installed = isInstalled(h);
   $('#md-body').innerHTML = `
     <div class="md-top">${h.icon ? `<img src="${esc(h.icon)}" alt="">` : '<div class="noimg"></div>'}
@@ -444,6 +466,7 @@ function showModDetails(h) {
 }
 $('#results').onclick = async e => {
   const d = e.target.closest('[data-detail]'); if (d) return showModDetails(state.results[+d.dataset.detail]);
+  const co = e.target.closest('[data-coll]'); if (co) return Extras.addToCollection(state.results[+co.dataset.coll], co);
   const pk = e.target.closest('[data-pack]');
   if (pk) { const h = state.results[+pk.dataset.pack]; pk.disabled = true; pk.textContent = 'Installing…'; return installPack(() => lab.installModpack({ source: h.source, projectId: h.id, title: h.title, icon: h.icon }), `Installing ${h.title}…`).finally(() => { pk.disabled = false; pk.textContent = 'Install as new instance'; }); }
   const ni = e.target.closest('[data-newinst]');
@@ -453,6 +476,7 @@ $('#results').onclick = async e => {
   b.disabled = true; b.textContent = 'Installing…';
   try {
     const r = await lab.installMod({ instanceId: state.current.id, source: h.source, projectId: h.id, type: h.type || 'mod' });
+    if (h.type === 'world') { b.disabled = false; b.textContent = 'Install again'; toast(`🗺 Added the world "${r.world}"! Press Play and find it in Singleplayer.${r.worldOk ? '' : ` (It was made for Minecraft ${r.worldVersions.slice(0, 3).join(', ')}, so it might not load perfectly.)`}`, 'ok'); Notes.add({ kind: 'mod', title: `Added the world ${r.world}`, body: `in ${state.current.name}`, action: { type: 'instance', id: state.current.id } }); return; }
     if (h.type === 'shader') toast('In Minecraft: Options → Video Settings → Shader Packs, then pick it! ✨');
     if (h.type === 'datapack') toast('This data pack will be added to every world in this instance when you press Play.');
     state.current = r.instance; updateCounts();
@@ -479,6 +503,7 @@ function renderInstalled() {
       ${m.icon ? `<img src="${esc(m.icon)}" alt="">` : '<div class="noimg"></div>'}
       <label class="switch" title="${m.disabled ? 'Turned off. Click to turn on' : 'On. Click to turn off'}"><input type="checkbox" data-toggle="${esc(m.file)}" ${m.disabled ? '' : 'checked'}><i></i></label>
       <div class="body"><h4>${esc(m.title)}${m.disabled ? ' <small class="off-tag">OFF</small>' : ''}</h4><span class="by">${esc(m.version)} · ${({ modrinth: 'from Modrinth', curseforge: 'from CurseForge', file: 'added from a file', maker: 'made with Mod Maker' })[m.source] || ''} · ${esc(m.file)}</span></div>
+      ${m.source === 'modrinth' || m.source === 'curseforge' ? `<button class="btn btn-ghost" data-vers="${esc(m.file)}" title="Pick another version, or go back to an older one">🕘 Versions</button>` : ''}
       <button class="btn btn-ghost danger" data-remove="${esc(m.file)}">Remove</button>
     </div>`).join('')).join('')
     : '<div class="loading">Nothing added yet. Head to <b>Browse</b> to add mods, shaders and packs!</div>';
@@ -506,6 +531,8 @@ window.addEventListener('drop', e => {
 });
 $('#installed-list').onchange = e => { const t = e.target.closest('[data-toggle]'); if (t) toggleMod(t.dataset.toggle); };
 $('#installed-list').onclick = async e => {
+  const v = e.target.closest('[data-vers]');
+  if (v) { const m = state.current.mods.find(x => x.file === v.dataset.vers); if (m) Extras.modPage({ source: m.source, id: m.projectId, title: m.title, icon: m.icon, type: m.type === 'clientmod' ? 'mod' : (m.type || 'mod'), author: '', downloads: 0, categories: [], description: '', url: '' }, 'versions'); return; }
   const b = e.target.closest('[data-remove]'); if (!b) return;
   state.current = await lab.removeMod({ instanceId: state.current.id, file: b.dataset.remove });
   updateCounts(); renderInstalled(); toast('Mod removed');
@@ -592,6 +619,7 @@ lab.onLaunchClosed(({ id, code }) => {
     toast(`Minecraft closed with code ${code} — check the Game log tab.`, 'err');
     const inst = state.instances.find(i => i.id === id);
     Notes.add({ kind: 'game', title: 'Minecraft crashed', body: `${inst?.name || 'Your instance'} closed with code ${code}. Open it and check the Game log.`, action: { type: 'instance', id } });
+    Extras.crashHelp(id, logs[id] || '', code);
   }
   lab.listInstances().then(l => { state.instances = l; renderSidebar(); });
 });
@@ -665,6 +693,8 @@ const CATS = {
   resourcepack: [['simplistic', '◻ Simple'], ['realistic', '📸 Realistic'], ['vanilla-like', '🟩 Vanilla-like'], ['themed', '🎭 Themed'], ['decoration', '🪑 Decoration'], ['combat', '⚔ PvP']],
   datapack: [['adventure', '⚔ Adventure'], ['magic', '✨ Magic'], ['worldgen', '🌄 World gen'], ['mobs', '🐺 Mobs'], ['utility', '🧰 Utility'], ['decoration', '🪑 Decoration']],
   modpack: [['adventure', '⚔ Adventure'], ['challenging', '💀 Hard'], ['kitchen-sink', '🧺 Kitchen sink'], ['lightweight', '🪶 Lightweight'], ['magic', '✨ Magic'], ['technology', '⚙ Tech'], ['quests', '📜 Quests'], ['multiplayer', '👥 Multiplayer']],
+  texturepack: [['8x-', '8x and lower'], ['16x', '16x'], ['32x', '32x'], ['48x', '48x'], ['64x', '64x'], ['128x', '128x'], ['256x', '256x'], ['512x+', '512x+']],
+  world: [['adventure', '⚔ Adventure'], ['survival', '🌲 Survival'], ['parkour', '🏃 Parkour'], ['puzzle', '🧩 Puzzle'], ['game-map', '🎯 Minigames'], ['creation', '🏰 Builds'], ['modded-world', '🧪 Modded']],
 };
 state.cat = '';
 function renderCats() {
@@ -743,6 +773,7 @@ async function renderOpts() {
   const saveWin = async () => { const on = $('#o-win-own').checked; ['#o-w', '#o-h', '#o-full'].forEach(s => { $(s).disabled = !on; }); state.current = await lab.updateInstance({ id: i.id, patch: { window: on ? { width: +$('#o-w').value, height: +$('#o-h').value, fullscreen: $('#o-full').checked } : null } }); };
   ['#o-win-own', '#o-w', '#o-h', '#o-full'].forEach(s => { $(s).onchange = saveWin; });
   $('#o-safe').onclick = async () => { await lab.safeMode(i.id); $('#iv-play').click(); toast('🛟 Starting in safe mode: all mods are off for this session.'); };
+  Extras.optsExtra(box, i);
   let nt; $('#o-notes').oninput = () => { clearTimeout(nt); $('#o-notes-s').textContent = 'Saving…'; nt = setTimeout(async () => { state.current = await lab.updateInstance({ id: i.id, patch: { notes: $('#o-notes').value } }); $('#o-notes-s').textContent = '✓ Saved'; }, 600); };
 }
 // #16 log search
@@ -772,7 +803,7 @@ function startBreakTimer() {
 // #98 storage cleaner
 const fmtSize = b => b > 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
 $('#s-storage').onclick = async () => {
-  const d = $('#mod-dlg'); // reuse a dialog
+  const d = $('#gen-dlg');
   d.innerHTML = `<div class="dlg"><h3 class="pix">🧹 Storage cleaner</h3><p class="fine">Looking…</p></div>`; $('#settings').close(); d.showModal();
   const r = await lab.storage.scan();
   d.innerHTML = `<div class="dlg"><h3 class="pix">🧹 Storage cleaner</h3><p class="muted">P1xel Lab uses <b>${fmtSize(r.total)}</b> in total. Your worlds, mods and settings are never touched here.</p>
@@ -788,7 +819,7 @@ async function whatsNew() {
   lab.setSettings({ lastSeenVersion: v }); state.settings.lastSeenVersion = v;
   if (!seen || seen === v) return;
   const r = await lab.updateNotes(v); if (!r?.notes) return;
-  const d = $('#mod-dlg');
+  const d = $('#gen-dlg');
   d.innerHTML = `<div class="dlg"><div class="upd-top"><span>${Pixels.logo(56)}</span><div><h3 class="pix">What's new</h3><p class="muted">P1xel Lab v${esc(v)}</p></div></div>
     <div class="upd-notes">${esc(r.notes).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^- /gm, '• ')}</div><div class="dlg-row end"><button class="btn btn-primary" id="wn-ok">Let's go!</button></div></div>`;
   $('#wn-ok').onclick = () => d.close();

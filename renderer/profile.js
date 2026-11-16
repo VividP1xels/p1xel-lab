@@ -154,8 +154,21 @@
     const mods = insts.reduce((a, i) => a + (i.mods || []).filter(m => (m.type || 'mod') === 'mod').length, 0);
     const makers = (await lab.maker.list().catch(() => [])).length;
     const cards = [['⏱', hm(total), 'played in P1xel Lab'], ['🎮', insts.length, 'instances'], ['🧩', mods, 'mods installed'], ['👥', (Social.friendsList?.() || []).length, 'friends'], ['📰', Social.myPosts().length, 'posts'], ['🛠', makers, 'creations']];
-    $('#pf-body').innerHTML = `<div class="stat-cards">${cards.map(([i, n, l]) => `<div class="srv-card stat"><span>${i}</span><b>${n}</b><small>${l}</small></div>`).join('')}</div>
-      <div class="srv-card"><b>Most played</b>${top.length ? top.slice(0, 10).map(i => `<div class="bar-row"><span class="inst-icon">${Pixels.block(i.icon, 24)}</span><span class="bn">${esc(i.name)}</span><div class="bar"><i style="width:${Math.max(3, i.playtime / max * 100)}%"></i></div><b>${hm(i.playtime)}</b></div>`).join('') : '<p class="fine">Play something to see your stats here!</p>'}</div>`;
+    const srvs = await lab.servers.list().catch(() => []);
+    const friends = (Social.friendsList?.() || []).length, posts = Social.myPosts().length, hours = total / 3600000;
+    const BADGES = [
+      ['🌱', 'First Steps', 'Make an instance', insts.length >= 1], ['🎮', 'Collector', 'Have 5 instances', insts.length >= 5],
+      ['⏱', 'Dedicated', 'Play for 10 hours', hours >= 10], ['🔥', 'Legend', 'Play for 100 hours', hours >= 100],
+      ['🧩', 'Modder', 'Install 25 mods', mods >= 25], ['🧪', 'Mod Maniac', 'Install 100 mods', mods >= 100],
+      ['👥', 'Friendly', 'Add a friend', friends >= 1], ['🎉', 'Squad', 'Have 5 friends', friends >= 5],
+      ['📰', 'Poster', 'Make a post', posts >= 1], ['🛠', 'Inventor', 'Make something in Create', makers >= 1],
+      ['🖥', 'Server Host', 'Make a server', srvs.length >= 1], ['🥔', 'Potato Power', 'Use potato mode', insts.some(i => i.potato)],
+      ['⭐', 'Favorites', 'Star an instance', insts.some(i => i.favorite)], ['📁', 'Organized', 'Put an instance in a folder', insts.some(i => i.group)],
+    ];
+    const got = BADGES.filter(b => b[3]).length;
+    $('#pf-body').innerHTML = `<div class="srv-card"><b>🏅 Badges <small class="muted">${got} of ${BADGES.length}</small></b><div class="badges">${BADGES.map(([i, n, how, ok]) => `<div class="badge-c ${ok ? 'got' : ''}" title="${esc(how)}"><span>${i}</span><b>${n}</b><small>${ok ? 'Earned!' : esc(how)}</small></div>`).join('')}</div></div>
+      <div class="stat-cards">${cards.map(([i, n, l]) => `<div class="srv-card stat"><span>${i}</span><b>${n}</b><small>${l}</small></div>`).join('')}</div>
+      <div class="srv-card"><b>Most played</b>${top.length ? top.slice(0, 10).map(i => `<div class="bar-row"><span class="inst-icon">${instIcon(i, 24)}</span><span class="bn">${esc(i.name)}</span><div class="bar"><i style="width:${Math.max(3, i.playtime / max * 100)}%"></i></div><b>${hm(i.playtime)}</b></div>`).join('') : '<p class="fine">Play something to see your stats here!</p>'}</div>`;
   }
   window.Profile = { open, showFriend, renderAccount };
 })();
