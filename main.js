@@ -717,14 +717,26 @@ function findJavaBin(dir) {
   }
   return null;
 }
-async function ensureJava(major) {
+// Does this Java actually run? (catches broken or half-downloaded Java)
+function javaWorks(bin) {
+  return new Promise(res => {
+    const exe = process.platform === 'win32' ? bin.replace(/javaw\.exe$/i, 'java.exe') : bin;
+    require('child_process').execFile(fs.existsSync(exe) ? exe : bin, ['-version'], { timeout: 30000, windowsHide: true }, (err, _o, stderr) => res(!err && /version/i.test(String(stderr))));
+  });
+}
+async function ensureJava(major, fresh) {
   const custom = readStore().javaPath;
-  if (custom) return custom;
-  const dir = path.join(JAVA_ROOT(), String(major));
+  if (custom && !fresh) {
+    if (await javaWorks(custom)) return custom;
+    send('launch:log', { line: `[P1xel Lab] The Java path in Settings (${custom}) doesn't work, so P1xel Lab is using its own Java.` });
+  }
+  if (fresh) { const wa = process.platform === 'win32' && process.arch === 'arm64'; await fsp.rm(path.join(JAVA_ROOT(), wa ? `${major}-x64` : String(major)), { recursive: true, force: true }); }
+  const winArm = process.platform === 'win32' && process.arch === 'arm64';
+  const dir = path.join(JAVA_ROOT(), winArm ? `${major}-x64` : String(major));
   if (fs.existsSync(dir)) { const b = findJavaBin(dir); if (b) return b; }
   if (!net.isOnline()) throw new Error(`Connect to the internet once so P1xel Lab can download Java ${major}.`);
   const os = { win32: 'windows', darwin: 'mac', linux: 'linux' }[process.platform];
-  const arch = { x64: 'x64', arm64: 'aarch64' }[process.arch] || 'x64';
+  const arch = winArm ? 'x64' : ({ x64: 'x64', arm64: 'aarch64' }[process.arch] || 'x64');
   const url = `https://api.adoptium.net/v3/binary/latest/${major}/ga/${os}/${arch}/jre/hotspot/normal/eclipse`;
   const ext = os === 'windows' ? 'zip' : 'tar.gz';
   const archive = path.join(JAVA_ROOT(), `jre-${major}.${ext}`);
@@ -735,10 +747,75 @@ async function ensureJava(major) {
   else await tar.x({ file: archive, cwd: dir });
   await fsp.rm(archive, { force: true });
   const bin = findJavaBin(dir);
-  if (!bin) throw new Error('Java download finished but no java binary was found.');
+  if (!bin) { await fsp.rm(dir, { recursive: true, force: true }); throw new Error('Java download didn\'t finish properly. Press Play again to retry.'); }
   if (process.platform !== 'win32') await fsp.chmod(bin, 0o755);
   return bin;
 }
+
+// ---------- game file check ----------
+// A download that got cut off leaves a broken file behind, and Minecraft then fails every time.
+// Before each launch, find broken files and delete them so they download again.
+const sha1File = f => new Promise((res, rej) => { const h = crypto.createHash('sha1'); fs.createReadStream(f).on('error', rej).on('data', d => h.update(d)).on('end', () => res(h.digest('hex'))); });
+const VERIFY_FILE = () => path.join(MC_ROOT(), 'p1xel-verified.json');
+const readJsonOk = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+async function checkGameFiles(mcVersion, custom, full) {
+  const root = MC_ROOT(), libs = path.join(root, 'libraries');
+  let cache = {}; if (!full) cache = readJsonOk(VERIFY_FILE()) || {};
+  const removed = [];
+  const kill = async f => { delete cache[f]; if (!fs.existsSync(f)) return; await fsp.rm(f, { recursive: true, force: true }); removed.push(path.relative(root, f)); };
+  // Read the file lists (with checksums) before anything gets deleted
+  let vj = readJsonOk(path.join(root, 'versions', mcVersion, `${mcVersion}.json`)) || (custom && readJsonOk(path.join(root, 'versions', custom, `${mcVersion}.json`)));
+  const cj = custom && readJsonOk(path.join(root, 'versions', custom, `${custom}.json`));
+  if (full) {
+    // Start the version files over (they download again), keep the big shared libraries unless broken
+    await kill(path.join(root, 'versions', mcVersion));
+    if (custom) await kill(path.join(root, 'versions', custom));
+    await kill(path.join(root, 'natives', mcVersion));
+    await kill(path.join(root, 'assets', 'indexes', `${custom || mcVersion}.json`));
+  }
+  for (const v of [mcVersion, custom].filter(Boolean)) {
+    const d = path.join(root, 'versions', v);
+    if (!fs.existsSync(d)) continue;
+    for (const f of await fsp.readdir(d)) if (f.endsWith('.json') && !readJsonOk(path.join(d, f))) await kill(path.join(d, f));
+  }
+  const idx = path.join(root, 'assets', 'indexes', `${custom || mcVersion}.json`);
+  if (fs.existsSync(idx) && !readJsonOk(idx)) await kill(idx);
+  if (!vj?.downloads) { try { const m = await mojangManifest(); const v = m.versions.find(x => x.id === mcVersion); if (v) vj = await getJSON(v.url); } catch {} }
+  const check = async (f, sha1) => {
+    let st; try { st = await fsp.stat(f); } catch { return; }
+    if (st.isDirectory()) return;
+    const key = `${st.size}:${Math.round(st.mtimeMs)}`;
+    if (cache[f] === key) return;
+    let good = st.size > 0;
+    if (good && sha1) good = (await sha1File(f).catch(() => '')) === String(sha1).toLowerCase();
+    else if (good && /\.jar$/i.test(f)) { try { good = new AdmZip(f).getEntries().length > 0; } catch { good = false; } }
+    if (good) cache[f] = key; else await kill(f);
+  };
+  const jarSha = vj?.downloads?.client?.sha1;
+  await check(path.join(root, 'versions', mcVersion, `${mcVersion}.jar`), jarSha);
+  if (custom) await check(path.join(root, 'versions', custom, `${custom}.jar`), jarSha);
+  for (const l of vj?.libraries || []) {
+    const a = l.downloads?.artifact; if (a?.path) await check(path.join(libs, a.path), a.sha1);
+    for (const c of Object.values(l.downloads?.classifiers || {})) if (c?.path) await check(path.join(libs, c.path), c.sha1);
+  }
+  for (const l of cj?.libraries || []) {
+    if (!l.name) continue;
+    const [g, a, v, c] = l.name.split(':'); if (!g || !a || !v) continue;
+    await check(path.join(libs, ...g.split('.'), a, v, `${a}-${v}${c ? '-' + c : ''}.jar`), l.sha1);
+  }
+  try { await fsp.mkdir(root, { recursive: true }); await fsp.writeFile(VERIFY_FILE(), JSON.stringify(cache)); } catch {}
+  return removed;
+}
+ipcMain.handle('game:repair', async (_e, id) => {
+  if (running.has(id)) throw new Error('Close Minecraft first.');
+  const inst = await readInstance(id);
+  const customs = (inst.loader === 'fabric' || inst.loader === 'quilt') && fs.existsSync(path.join(MC_ROOT(), 'versions'))
+    ? fs.readdirSync(path.join(MC_ROOT(), 'versions')).filter(d => d.startsWith(`${inst.loader}-loader-`) && d.endsWith(`-${inst.mcVersion}`)) : [];
+  let removed = await checkGameFiles(inst.mcVersion, null, true);
+  for (const c of customs) removed = removed.concat(await checkGameFiles(inst.mcVersion, c, true));
+  await safeModsBack(id);
+  return { removed: removed.length };
+});
 
 // ---------- launch ----------
 async function ensureLoaderProfile(loader, mcVersion, pinned) {
@@ -783,13 +860,35 @@ app.whenReady().then(async () => { try { for (const id of await fsp.readdir(INST
 const safeNext = new Set();
 ipcMain.handle('game:safe', (_e, id) => { safeNext.add(id); return true; });
 ipcMain.handle('game:launch', async (_e, id) => {
+  try { return await launchGame(id); }
+  catch (e) {
+    send('launch:log', { id, line: `[P1xel Lab] ❌ Couldn't start: ${e.message}` });
+    throw e;
+  }
+});
+// Turn launcher errors into words people understand
+function friendlyLaunchError(reason) {
+  const r = String(reason || '');
+  if (/ENOSPC|no space/i.test(r)) return 'Your computer is out of storage space. Free some up (Settings → 🧹 Storage cleaner helps) and try again.';
+  if (/ENOTFOUND|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket hang up|network/i.test(r)) return "Minecraft's files couldn't download. Check your internet and press Play again.";
+  if (/EPERM|EACCES|EBUSY/i.test(r)) return 'Another program is using Minecraft\'s files (maybe antivirus, or Minecraft is still open). Close it, or restart your computer, and try again.';
+  if (/java/i.test(r)) return "Java couldn't start. Press Repair and P1xel Lab will download it again.";
+  return `Minecraft couldn't start (${r.slice(0, 160) || 'unknown reason'}). Press Repair and try again.`;
+}
+async function launchGame(id) {
   if (!currentUser) throw new Error('Sign in with Microsoft first.');
   if (running.has(id)) throw new Error('That instance is already running.');
   const inst = await readInstance(id);
   await syncDatapacks(id);
   const store = readStore();
   send('launch:status', { id, stage: 'Checking Java…' });
-  const javaPath = await ensureJava(await requiredJava(inst.mcVersion));
+  const major = await requiredJava(inst.mcVersion);
+  let javaPath = await ensureJava(major);
+  if (!(await javaWorks(javaPath))) {
+    send('launch:log', { id, line: `[P1xel Lab] Java ${major} is broken, downloading it again…` });
+    javaPath = await ensureJava(major, true);
+    if (!(await javaWorks(javaPath))) throw new Error(`Java ${major} won't start on this computer. Try restarting your computer, or check that antivirus isn't blocking it.`);
+  }
   let custom, forge;
   if (inst.loader === 'fabric' || inst.loader === 'quilt') {
     send('launch:status', { id, stage: `Setting up ${inst.loader}…` });
@@ -803,22 +902,27 @@ ipcMain.handle('game:launch', async (_e, id) => {
   let joinArgs = {};
   if (join?.type === 'singleplayer' && newerOrSame(inst.mcVersion, '1.20')) joinArgs = { quickPlay: { type: 'singleplayer', identifier: join.identifier } };
   else if (join?.type === 'multiplayer') joinArgs = newerOrSame(inst.mcVersion, '1.20') ? { quickPlay: { type: 'multiplayer', identifier: join.identifier } } : { customLaunchArgs: ['--server', join.identifier.split(':')[0], '--port', join.identifier.split(':')[1] || '25565'] };
+  send('launch:status', { id, stage: 'Checking game files…' });
+  try { const bad = await checkGameFiles(inst.mcVersion, custom || null, false); if (bad.length) send('launch:log', { id, line: `[P1xel Lab] 🔧 Fixed ${bad.length} broken game file(s); they'll download again: ${bad.slice(0, 8).join(', ')}` }); }
+  catch (e) { console.warn('file check', e.message); }
   const ram = Math.max(1024, Number(inst.ramMB) || Number(store.ramMB) || 4096);
   const safe = safeNext.delete(id);
   if (safe) { const n = await safeModsOff(id); send('launch:log', { id, line: `[P1xel Lab] 🛟 Safe mode: ${n} mods turned off for this session.` }); }
+  let failReason = '';
   const launcher = new Client();
   launcher.on('progress', p => send('launch:status', { id, stage: `Downloading ${p.type}…`, pct: p.total ? p.task / p.total : 0 }));
-  launcher.on('debug', m => send('launch:log', { id, line: String(m) }));
+  launcher.on('debug', m => { const t = String(m); const f = t.match(/Failed to start due to (.*?)(, closing\.\.\.)?$|Couldn't start Minecraft due to: (.*)$/); if (f) failReason = f[1] || f[3] || t; send('launch:log', { id, line: t }); });
   launcher.on('data', m => send('launch:log', { id, line: String(m) }));
   const startedAt = Date.now();
   launcher.on('close', async code => {
+    if (!running.has(id)) return; // failed before the game started (handled below)
     running.delete(id); playing = running.size ? playing : null;
     if (safe) await safeModsBack(id);
     if (readStore().hideOnPlay && win && !win.isDestroyed() && !win.isVisible()) { win.show(); win.focus(); }
     try { const i2 = await readInstance(id); i2.playtime = (i2.playtime || 0) + Math.max(0, Date.now() - startedAt); await writeInstance(i2); } catch {}
     send('launch:closed', { id, code });
   });
-  const proc = await launcher.launch({
+  const opts = {
     root: MC_ROOT(),
     authorization: currentUser,
     version: { number: inst.mcVersion, type: 'release', ...(custom ? { custom } : {}) },
@@ -829,8 +933,18 @@ ipcMain.handle('game:launch', async (_e, id) => {
     javaPath,
     overrides: { gameDirectory: instDir(id), detached: false, maxSockets: 32 }, // download 32 files at once (default was 2)
     customArgs: FAST_JVM,
-  });
-  if (!proc) { if (safe) await safeModsBack(id); throw new Error('Minecraft failed to start — check the log.'); }
+  };
+  let proc = await launcher.launch(opts);
+  if (!proc) {
+    // Something was broken: repair the game files once and try again
+    send('launch:log', { id, line: `[P1xel Lab] 🔧 Start failed (${failReason || 'unknown'}). Repairing game files and trying again…` });
+    send('launch:status', { id, stage: 'Repairing game files…' });
+    try { await checkGameFiles(inst.mcVersion, custom || null, true); } catch {}
+    if (custom) { try { opts.version.custom = await ensureLoaderProfile(inst.loader, inst.mcVersion, inst.loaderVersion); } catch {} }
+    failReason = '';
+    proc = await launcher.launch(opts);
+  }
+  if (!proc) { if (safe) await safeModsBack(id); throw new Error(friendlyLaunchError(failReason)); }
   running.set(id, proc);
   if (store.hideOnPlay && win && !win.isDestroyed()) setTimeout(() => { if (running.has(id)) win.hide(); }, 4000);
   playing = inst.name;
@@ -838,7 +952,7 @@ ipcMain.handle('game:launch', async (_e, id) => {
   await writeInstance(inst);
   send('launch:status', { id, stage: 'running' });
   return true;
-});
+}
 // ---------- speed ----------
 // Java settings tuned for Minecraft (smoother frames, shorter freezes)
 const FAST_JVM = ['-XX:+UseG1GC', '-XX:+ParallelRefProcEnabled', '-XX:MaxGCPauseMillis=200', '-XX:+UnlockExperimentalVMOptions', '-XX:+DisableExplicitGC',

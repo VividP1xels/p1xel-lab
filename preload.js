@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('lab', {
   modChangelog: d => invoke('mods:changelog', d),
   saveText: d => invoke('text:save', d),
   potato: d => invoke('instances:potato', d),
+  repairGame: id => invoke('game:repair', id),
   installMod: d => invoke('mods:install', d),
   removeMod: d => invoke('mods:remove', d),
   isOnline: () => invoke('net:online'),

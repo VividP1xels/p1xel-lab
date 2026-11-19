@@ -594,7 +594,7 @@ $('#iv-play').onclick = async () => {
   $('#log').textContent = '';
   $('#launch-bar').classList.remove('hidden'); $('#launch-text').textContent = 'Preparing…'; $('#launch-pct').style.width = '0';
   try { await lab.launch(id); }
-  catch (e) { launchState[id] = null; setPlayState(null); toast(errMsg(e), 'err'); }
+  catch (e) { launchState[id] = null; setPlayState(null); Extras.launchError(id, errMsg(e)); }
 };
 lab.onLaunchStatus(s => {
   if (s.id && s.id !== state.current?.id) { if (s.stage === 'running') launchState[s.id] = 'running'; return; }

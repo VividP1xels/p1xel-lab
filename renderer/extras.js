@@ -287,6 +287,7 @@
     if (/Duplicate mods? found|found duplicate mods|is present multiple times|Duplicate key|DuplicateModsFoundException|Found 2 mods with id/i.test(tail)) out.push({ icon: '👯', title: 'The same mod is in twice', text: 'Two copies of one mod are installed. Remove the older one in the Installed tab.' });
     if (/NoClassDefFoundError: net\/minecraftforge|is a Forge mod|NoClassDefFoundError: net\/fabricmc|not a Fabric mod|Found a Forge mod/i.test(tail)) out.push({ icon: '🔀', title: 'A mod is for a different loader', text: `Some mods are made for another loader (Fabric vs Forge). This instance uses <b>${esc(LOADER_NAME[loader] || loader || 'one loader')}</b>. Remove mods made for the other one.` });
     if (/GLFW error|Pixel format not accelerated|OpenGL.*not supported|WGL: The driver does not appear to support OpenGL|EXCEPTION_ACCESS_VIOLATION.*(ig[0-9a-z]+|atio6axx|nvoglv)/i.test(tail)) out.push({ icon: '🖥', title: 'Graphics driver problem', text: 'Update your graphics drivers (Intel, AMD or NVIDIA website). On a laptop, make Minecraft use the strong graphics card.' });
+    if (/ZipException|invalid LOC header|zip END header|Error opening zip file|Invalid or corrupt jarfile|Could not find or load main class|ClassNotFoundException: net\.(minecraft|fabricmc)\.|NoClassDefFoundError: (net\/minecraft|org\/lwjgl)|Failed to locate library|UnsatisfiedLinkError/i.test(tail)) out.push({ icon: '🔧', title: 'Some game files are broken', text: 'A download probably got cut off. Press <b>🔧 Repair</b> and P1xel Lab will download the broken files again.', repair: true });
     if (/shader.*(compile|link).*(error|fail)|Failed to (?:load|compile) shader/i.test(tail)) out.push({ icon: '✨', title: 'A shader didn\'t work', text: 'Turn shaders off (Options → Video Settings → Shader Packs → OFF) or try another shader pack.' });
     return out;
   }
@@ -296,16 +297,45 @@
     const errs = (log || '').split('\n').filter(l => /Exception|Error:|Caused by|FATAL|\bERROR\b/.test(l)).slice(-6);
     dlg(`<div class="dlg wide"><h3 class="pix">💥 Minecraft crashed</h3><p class="muted"><b>${esc(inst?.name || 'Your instance')}</b> closed with code ${esc(code)}. Here's what P1xel Lab found:</p>
       ${found.length ? found.map((f, n) => `<div class="crash-hit"><span>${f.icon}</span><div><b>${f.title}</b><p>${f.text}</p>
-        <div class="row">${(f.find || []).map(x => `<button class="btn btn-primary sm" data-find="${esc(x)}">🔎 Find ${esc(x)}</button>`).join('')}${f.ram ? '<button class="btn btn-primary sm" id="cr-ram">🧠 Give it 2 GB more</button>' : ''}</div></div></div>`).join('')
+        <div class="row">${(f.find || []).map(x => `<button class="btn btn-primary sm" data-find="${esc(x)}">🔎 Find ${esc(x)}</button>`).join('')}${f.ram ? '<button class="btn btn-primary sm" id="cr-ram">🧠 Give it 2 GB more</button>' : ''}${f.repair ? '<button class="btn btn-primary sm" data-repair>🔧 Repair</button>' : ''}</div></div></div>`).join('')
         : `<div class="crash-hit"><span>🤔</span><div><b>Couldn't tell exactly what went wrong</b><p>Try <b>safe mode</b> (all mods off). If it works, a mod is the problem: turn mods back on a few at a time to find it.</p>${errs.length ? `<pre class="crash-lines">${esc(errs.join('\n'))}</pre>` : ''}</div></div>`}
-      <div class="dlg-row end"><button class="btn btn-ghost" id="cr-save">💾 Save crash log</button><button class="btn btn-ghost" id="cr-log">📄 Game log</button><button class="btn btn-ghost" id="cr-safe">🛟 Try safe mode</button><button class="btn btn-primary" data-close>OK</button></div></div>`);
+      <div class="dlg-row end"><button class="btn btn-ghost" data-repair>🔧 Repair game files</button><button class="btn btn-ghost" id="cr-save">💾 Save crash log</button><button class="btn btn-ghost" id="cr-log">📄 Game log</button><button class="btn btn-ghost" id="cr-safe">🛟 Try safe mode</button><button class="btn btn-primary" data-close>OK</button></div></div>`);
     const d = gen();
     const go = async () => { if (state.current?.id !== id) await selectInstance(id); };
     d.querySelectorAll('[data-find]').forEach(b => { b.onclick = async () => { d.close(); await go(); state.type = 'mod'; $$('#type-chips [data-type]').forEach(x => x.classList.toggle('active', x.dataset.type === 'mod')); $('#m-query').value = b.dataset.find; setTab('browse'); search(true); }; });
     $('#cr-ram') && ($('#cr-ram').onclick = async () => { const cur = inst?.ramMB || state.settings.ramMB || 4096; const r = Math.min(16384, cur + 2048); await lab.updateInstance({ id, patch: { ramMB: r } }); state.instances = await lab.listInstances(); if (state.current?.id === id) state.current = await lab.getInstance(id); toast(`🧠 ${inst?.name} now gets ${(r / 1024).toFixed(1)} GB. Press Play again!`, 'ok'); d.close(); });
     $('#cr-log').onclick = async () => { d.close(); await go(); setTab('log'); };
+    d.querySelectorAll('[data-repair]').forEach(b => { b.onclick = () => repairAndPlay(id, b); });
     $('#cr-safe').onclick = async () => { d.close(); await go(); await lab.safeMode(id); $('#iv-play').click(); };
     $('#cr-save').onclick = () => lab.saveText({ name: `${(inst?.name || 'minecraft').replace(/[^\w -]/g, '')} crash.txt`, text: `P1xel Lab crash report\n${inst?.name} · Minecraft ${inst?.mcVersion} ${inst?.loader}\nExit code ${code}\n\nFound:\n${found.map(f => `- ${f.title}: ${f.text.replace(/<[^>]+>/g, '')}`).join('\n') || '- nothing specific'}\n\n----- log -----\n${(log || '').slice(-200000)}` });
+  }
+
+  // ================= Minecraft couldn't start =================
+  async function repairAndPlay(id, btn) {
+    const all = gen().querySelectorAll('[data-repair]'); all.forEach(b => { b.disabled = true; }); if (btn) btn.textContent = '🔧 Repairing…';
+    try {
+      const r = await lab.repairGame(id);
+      gen().close();
+      toast(`🔧 Repaired! ${r.removed ? `Removed ${r.removed} old or broken files.` : ''} Starting Minecraft (it downloads fresh files, so give it a minute)…`, 'ok');
+      if (state.current?.id !== id) await selectInstance(id);
+      $('#iv-play').click();
+    } catch (e) { toast(errMsg(e), 'err'); all.forEach(b => { b.disabled = false; }); if (btn) btn.textContent = '🔧 Repair'; }
+  }
+  function launchError(id, msg) {
+    const inst = state.instances.find(i => i.id === id);
+    const tail = ((typeof logs !== 'undefined' ? logs[id] : '') || '').split('\n').slice(-40).join('\n');
+    dlg(`<div class="dlg wide"><h3 class="pix">😵 Minecraft couldn't start</h3><p class="muted"><b>${esc(inst?.name || 'Your instance')}</b> (Minecraft ${esc(inst?.mcVersion || '')} ${esc(LOADER_NAME[inst?.loader] || '')})</p>
+      <div class="crash-hit"><span>⚠</span><div><b>What happened</b><p>${esc(msg)}</p></div></div>
+      <p class="fine">Most of the time <b>🔧 Repair</b> fixes it: P1xel Lab deletes broken game files and downloads fresh ones. Still stuck? Press <b>📋 Copy details</b> and paste it to whoever is helping you.</p>
+      <div class="dlg-row end"><button class="btn btn-ghost" id="le-copy">📋 Copy details</button><button class="btn btn-ghost" id="le-safe">🛟 Try safe mode</button><button class="btn btn-ghost" data-close>Close</button><button class="btn btn-primary" data-repair>🔧 Repair & try again</button></div></div>`);
+    const d = gen();
+    d.querySelector('[data-repair]').onclick = e => repairAndPlay(id, e.currentTarget);
+    $('#le-copy').onclick = async () => {
+      const v = await Promise.resolve(lab.appVersion?.()).catch(() => '');
+      navigator.clipboard.writeText(`P1xel Lab ${v} couldn't start Minecraft\n${inst?.name} · Minecraft ${inst?.mcVersion} ${inst?.loader} · ${(inst?.mods || []).length} mods\nError: ${msg}\n\n--- last lines of the game log ---\n${tail}`);
+      toast('📋 Copied! Paste it in your message.', 'ok');
+    };
+    $('#le-safe').onclick = async () => { d.close(); if (state.current?.id !== id) await selectInstance(id); await lab.safeMode(id); $('#iv-play').click(); };
   }
 
   // ================= keyboard shortcuts =================
@@ -400,5 +430,5 @@
   }
   applyCustom();
 
-  window.Extras = { modPage, addToCollection, openCollections, optsExtra, crashHelp, diagnose, openCustomize, startView, showShortcuts, sanitize, markdown, squareImage };
+  window.Extras = { launchError, repairAndPlay, modPage, addToCollection, openCollections, optsExtra, crashHelp, diagnose, openCustomize, startView, showShortcuts, sanitize, markdown, squareImage };
 })();
